@@ -143,10 +143,17 @@ termmd README.md              # interactive pager
 termmd -P README.md           # print and exit
 termmd *.md                   # several files, labelled and concatenated
 curl -s example.com/doc.md | termmd
+termmd --remote-images R.md   # fetch http(s) images — off by default
 termmd --watch NOTES.md       # re-render on save
 termmd --toc README.md        # just the table of contents
 termmd --caps                 # what termmd detected about your terminal
 ```
+
+If a picture is missing, it is almost always a remote one: most README badges
+live at an `http(s)` URL, and termmd does not fetch those unless asked. The
+placeholder says so where the image would have been —
+`🖼 Build (remote image, run with --remote-images)` — and `remote-images = true`
+in the config makes it the default.
 
 Piped output is plain text with no escape sequences, so `termmd doc.md | grep`
 behaves. Use `--color=always` to keep the colour through a pipe.
