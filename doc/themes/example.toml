@@ -1,0 +1,74 @@
+# An example termmd theme.
+#
+# Save as ~/.config/termmd/themes/<name>.toml and select it with
+# `termmd --theme <name>` or `theme = "<name>"` in config.toml.
+#
+# A theme layers over a built-in base, so you only write the roles you want to
+# change. Every role takes a style: a colour and any number of attributes, in
+# any order.
+#
+#   Attributes  bold, dim, italic, underline, strike, reverse
+#   Colours     #rgb, #rrggbb, a name (red, bright-blue), or @N for palette
+#               index N -- which follows the user's own terminal colours
+#   Background  "on <colour>", e.g. "#fff on #333"
+#   Nothing     "none"
+
+name = "example"
+base = "dark"          # dark | light | mono
+dark = true            # whether this theme suits a dark background
+
+syntax-theme = "base16-ocean.dark"
+code_block_bg = "#1b1f27"   # or "none" for no panel behind code
+
+# --- headings ---------------------------------------------------------------
+h1 = "#6fb3ff bold"
+h2 = "#cfa4ff bold"
+h3 = "#4fd0dd bold"
+h4 = "#7bdc8a bold"
+h5 = "#8a94a3 bold"
+h6 = "#8a94a3 italic"
+heading_rule = "#3a4250"
+
+# --- body text --------------------------------------------------------------
+text        = "none"
+muted       = "#8a94a3"
+emphasis    = "italic"
+strong      = "bold"
+strikethrough = "#8a94a3 strike"
+inline_code = "#ffa25c on #1b1f27"
+math        = "#4fd0dd"
+caption     = "#8a94a3 italic"
+
+# --- links ------------------------------------------------------------------
+link_text = "#6fb3ff underline"
+link_url  = "#5b6472"
+
+# --- quotes and lists -------------------------------------------------------
+quote_bar      = "#5b6472"
+quote_text     = "#8a94a3 italic"
+bullet         = "#6fb3ff"
+number         = "#6fb3ff"
+task_done      = "#7bdc8a"
+task_todo      = "#8a94a3"
+task_done_text = "#8a94a3"
+
+# --- tables and rules -------------------------------------------------------
+table_border = "#3a4250"
+table_header = "bold"
+table_stripe = "none"      # or e.g. "on #1b1f27" for zebra striping
+rule         = "#3a4250"
+code_gutter  = "#5b6472"
+footnote_ref = "#4fd0dd"
+
+# --- alerts -----------------------------------------------------------------
+note      = "#6fb3ff bold"
+tip       = "#7bdc8a bold"
+important = "#cfa4ff bold"
+warning   = "#f0c95c bold"
+caution   = "#ff7a70 bold"
+
+# --- pager chrome -----------------------------------------------------------
+status_bar     = "#dce3ea on #1b1f27"
+status_key     = "#6fb3ff on #1b1f27 bold"
+search_match   = "#1b1f27 on #f0c95c"
+search_current = "#1b1f27 on #ffa25c bold"

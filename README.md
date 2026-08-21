@@ -1,0 +1,318 @@
+# termmd
+
+[![CI](https://github.com/EdMUK/termmd/actions/workflows/ci.yml/badge.svg)](https://github.com/EdMUK/termmd/actions/workflows/ci.yml)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+
+A Markdown viewer for terminals that can do more than plain text.
+
+Terminals have quietly become capable. They do 24-bit colour, they draw images
+through three different protocols, they have clickable hyperlinks, and they know
+how wide a Japanese character is. Most terminal Markdown viewers were written
+before some of that was true, and it shows: tables come out ragged or missing,
+images turn into `[image]`, CJK text overflows the right margin, and a wide table
+is simply cut off.
+
+`termmd` is an attempt to use what the terminal actually offers.
+
+```
+ # termmd
+ ────────
+
+ A Markdown viewer for the terminal with real typography, inline code,
+ strikethrough, and links.
+
+ ## Features
+ ───────────
+
+ • Full CommonMark and GFM
+   ◦ Nested lists
+ [✔] Task lists
+ [☐] Still to do
+
+ ▌ NOTE
+ ▌ GitHub alerts get their own colour and label.
+
+ ┌─────────┬──────┬────────┐
+ │ Feature │ glow │ termmd │
+ ├─────────┼──────┼────────┤
+ │ Tables  │ yes  │    yes │
+ │ Images  │ no   │    yes │
+ └─────────┴──────┴────────┘
+```
+
+## What it does
+
+**Images, actually rendered.** Four backends, chosen automatically: the kitty
+graphics protocol, iTerm2's inline images, DEC sixel, and Unicode half blocks.
+The first three draw real pixels. The last one works anywhere with 256 colours,
+including inside tmux and over ssh, so an image is never just a caption.
+
+PNG, JPEG, GIF, WebP, BMP, TIFF and **SVG** — which matters more than it sounds,
+because most badges in a README are SVG. Vector images are rendered at the exact
+pixel size the terminal will show, rather than rasterised once and scaled, so
+small text in a badge stays legible.
+
+Remote images are **off by default**: opening a document should not make network
+requests you did not ask for. Pass `--remote-images`, or set
+`remote-images = true` in the config, to fetch them. An image that cannot be
+shown says why — `(remote image, run with --remote-images)`, `(file not found)`,
+`(cannot read AVIF image)` — rather than silently leaving a gap.
+
+**Tables that fit.** Column widths are measured, not guessed. Spare room goes to
+the columns that need it; when space runs short the widest column wraps while
+`1.2.0` and `Yes` stay intact. Below the width where a grid stops being readable,
+the table becomes a list of records rather than a mangled box.
+
+**Typography.** Text is measured in display columns over grapheme clusters, so
+CJK, emoji, and combining accents wrap where they should. Lists hang their
+continuation lines under the text. Quotes carry a bar down the whole block.
+GitHub alerts (`> [!WARNING]`) get their own colour and label.
+
+**Syntax highlighting** for 213 languages and 32 code themes, through
+[`syntect`](https://github.com/trishume/syntect) with the extended grammar and
+theme set from [`two-face`](https://codeberg.org/CosmicHarper/two-face). Fence
+languages are resolved through aliases (`rs`, `js`, `yml`, `console`), and a
+block with no language at all is sniffed from its first line.
+
+**An interactive pager**: search with live highlighting, a table of contents you
+can jump from, a link list, horizontal scrolling for wide tables, and live reload
+on file change. Links are clickable, and a link to another local Markdown file
+opens in termmd itself — `backspace` goes back — so a directory of documents is
+browsable without leaving the terminal. A document that already fits on one
+screen is just printed.
+
+**It degrades honestly.** Truecolor falls back to 256, then 16, then to bold and
+underline. Box drawing falls back to ASCII. Every fallback can be forced, and
+`termmd --caps` shows what was detected and why.
+
+## Install
+
+### Prebuilt binaries
+
+Download an archive for your platform from the
+[releases page](https://github.com/EdMUK/termmd/releases), unpack it, and put
+`termmd` somewhere on your `PATH`:
+
+```sh
+# macOS (Apple silicon); swap the target for your platform
+curl -sSL https://github.com/EdMUK/termmd/releases/latest/download/termmd-aarch64-apple-darwin.tar.gz \
+  | tar xz
+sudo mv termmd /usr/local/bin/
+```
+
+Each release also has a `SHA256SUMS` file if you want to check the download.
+
+macOS may quarantine a binary downloaded with a browser. If it refuses to run:
+
+```sh
+xattr -d com.apple.quarantine /usr/local/bin/termmd
+```
+
+### With cargo
+
+```sh
+cargo install termmd
+```
+
+Or straight from the repository, which does not wait on a crates.io release:
+
+```sh
+cargo install --git https://github.com/EdMUK/termmd
+```
+
+### From source
+
+```sh
+git clone https://github.com/EdMUK/termmd
+cd termmd
+cargo install --path .
+```
+
+Requires Rust 1.85 or later. `cargo install --no-default-features` drops SVG
+support and its dependencies, which makes for a smaller binary if you do not
+care about badges.
+
+### Check it works
+
+```sh
+termmd --caps        # what termmd detected about your terminal
+termmd doc/demo.md   # everything it can draw, in one document
+```
+
+## Usage
+
+```sh
+termmd README.md              # interactive pager
+termmd -P README.md           # print and exit
+termmd *.md                   # several files, labelled and concatenated
+curl -s example.com/doc.md | termmd
+termmd --watch NOTES.md       # re-render on save
+termmd --toc README.md        # just the table of contents
+termmd --caps                 # what termmd detected about your terminal
+```
+
+Piped output is plain text with no escape sequences, so `termmd doc.md | grep`
+behaves. Use `--color=always` to keep the colour through a pipe.
+
+### Options
+
+| Flag | Effect |
+|:--|:--|
+| `-w`, `--width <COLS>` | Text width. Defaults to the terminal, capped at 100. |
+| `--margin <COLS>` | Left and right margin. |
+| `-p`, `--pager` / `-P`, `--no-pager` | Force the pager on or off. |
+| `--plain` | No styling, no images, plain text. |
+| `-t`, `--theme <NAME\|PATH>` | `dark`, `light`, `mono`, or a theme file. |
+| `--syntax-theme <NAME>` | Code theme; see `--list-themes`. |
+| `--color <WHEN>` | `auto`, `always`, `never`, `16`, `256`, `truecolor`. |
+| `--images <PROTOCOL>` | `auto`, `kitty`, `iterm2`, `sixel`, `blocks`, `none`. |
+| `--remote-images` | Fetch `http(s)` images. Off by default. |
+| `--no-default-features` | (build) drop SVG support and its dependencies. |
+| `--links <MODE>` | `auto`, `hyperlink`, `inline`, `reference`, `hide`. |
+| `-n`, `--line-numbers` | Line numbers beside code blocks. |
+| `--ascii` | Draw with ASCII only. |
+| `--watch` | Re-render when the file changes. |
+
+### Keys
+
+| Key | Action |
+|:--|:--|
+| `j` `k` arrows | Scroll a line |
+| `space` `b` | Scroll a page |
+| `d` `u` | Scroll half a page |
+| `g` `G` | Start, end |
+| `h` `l` `0` | Scroll sideways |
+| `/` `?` `n` `N` | Search forwards, backwards, next, previous |
+| `t` | Table of contents |
+| `L` | Links |
+| `backspace` | Back to the previous document |
+| drag | Select text, as in any other terminal output |
+| `m` | Give termmd the mouse, so clicks follow links |
+| `i` | Toggle images |
+| `r` | Reload |
+| `H` `F1` | Help |
+| `q` `esc` | Quit |
+
+**The mouse belongs to your terminal.** Reporting the mouse to the application is
+what stops you dragging to select and copy, and selecting text is something
+people need far more often than clicking a link. So termmd does not ask for the
+mouse. It turns on alternate scroll instead, which makes the terminal translate
+wheel events into arrow keys: the wheel scrolls, drag selects, and your terminal
+handles link clicks itself.
+
+Press `m` if you want the other arrangement — termmd sees clicks and can follow
+links itself, including in-document `#anchors` and links to other local Markdown
+files, which no terminal can do. `shift`-drag still selects while that is on, and
+`mouse = true` in the config makes it the default.
+
+## Terminal support
+
+| Terminal | Images | Colour | Hyperlinks |
+|:--|:--|:--|:--|
+| kitty, Ghostty, WezTerm | kitty protocol | truecolor | yes |
+| iTerm2 | iTerm2 protocol | truecolor | yes |
+| foot, mlterm, xterm (`-ti vt340`) | sixel | truecolor | varies |
+| Windows Terminal, Konsole | sixel | truecolor | yes |
+| Alacritty, Terminal.app, anything else | half blocks | 256 or 16 | varies |
+| tmux, screen | half blocks | inherited | inherited |
+
+Detection is by live query where possible: `termmd` asks the terminal what it
+supports and only falls back to guessing from `TERM` when nothing answers. Inside
+a multiplexer it uses half blocks, because passthrough of graphics sequences is
+not something to rely on.
+
+Sixel is encoded by termmd itself, including the colour quantisation: median cut
+over a 15-bit histogram, Floyd–Steinberg dithering, and run-length encoded
+output. There is no `libsixel` dependency.
+
+## Configuration
+
+`~/.config/termmd/config.toml`, or `$TERMMD_CONFIG`:
+
+```toml
+# Themes: a built-in name, or a file in ~/.config/termmd/themes/
+theme = "dark"
+# Or pick per background, when the terminal tells us what its background is:
+light-theme = "light"
+dark-theme  = "dark"
+
+syntax-theme = "base16-ocean.dark"
+
+width  = 100
+margin = 1
+
+pager  = true
+mouse  = true
+images = true
+remote-images = false
+max-image-rows = 24
+
+links = "auto"          # auto | hyperlink | inline | reference | hide
+line-numbers = false
+heading-rules = true
+```
+
+Unknown keys are an error rather than being ignored, so a typo is reported
+instead of quietly doing nothing.
+
+### Themes
+
+A theme is a TOML file that layers over a built-in one:
+
+```toml
+name = "midnight"
+base = "dark"
+
+h1          = "#8be9fd bold underline"
+h2          = "#bd93f9 bold"
+inline_code = "#ffb86c on #282a36"
+link_text   = "#8be9fd underline"
+quote_bar   = "#6272a4"
+table_stripe = "none"
+```
+
+A style is a colour and any number of attributes, in any order: `bold`, `dim`,
+`italic`, `underline`, `strike`, `reverse`, and `on <colour>` for a background.
+Colours are `#rgb`, `#rrggbb`, a name (`red`, `bright-blue`), or `@N` for palette
+index N — which follows the user's own terminal colours rather than fixing an RGB
+value.
+
+## How it fits together
+
+```text
+source text ──▶ markdown::parse ──▶ Document ──▶ render ──▶ Screen ──▶ terminal
+                                     (tree)                (styled lines)
+```
+
+The `Screen` in the middle is the important boundary. Both the print path and the
+interactive pager consume the same value, so what you see when you scroll is
+exactly what you get when you pipe — and layout can be tested by rendering a
+document at a fixed width and asserting on plain text, with no terminal involved.
+
+## Prior art
+
+Several terminal Markdown viewers came first, and this one is better for having
+looked at what they do:
+
+- [glow](https://github.com/charmbracelet/glow) — a polished TUI browser for
+  local and remote documents. At the time of writing it does not render images.
+- [mdcat](https://github.com/swsnr/mdcat) — the tool that showed terminal
+  Markdown could include real pictures. At the time of writing it does not render
+  tables.
+- [bat](https://github.com/sharkdp/bat) — not a Markdown renderer, but its
+  handling of syntax themes and the ANSI palette convention is worth knowing
+  about if you work on this sort of thing.
+
+No code was taken from any of them. The protocol implementations here are written
+from the published specifications — kitty's
+[graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/), iTerm2's
+[inline images](https://iterm2.com/documentation-images.html), and DEC sixel.
+
+## Licence
+
+[MIT](LICENSE).
+
+The dependencies are permissively licensed too — mostly MIT or Apache 2.0, with
+`tiny-skia` (reached through `resvg`) under BSD 3-Clause. `cargo tree` will show
+you the full set, and `cargo install --no-default-features` removes the SVG
+stack entirely.

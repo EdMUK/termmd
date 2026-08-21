@@ -1,0 +1,93 @@
+# termmd configuration.
+#
+# Copy to ~/.config/termmd/config.toml, or point $TERMMD_CONFIG at it.
+# Every setting here is optional and mirrors a command-line flag; flags win.
+# Unknown keys are an error, so a typo is reported rather than ignored.
+
+# --- appearance -------------------------------------------------------------
+
+# A built-in theme (dark, light, mono) or the name of a file in
+# ~/.config/termmd/themes/, or a path to one.
+theme = "dark"
+
+# Pick a theme by terminal background instead. Only used when the terminal
+# answers the background-colour query; otherwise `theme` applies.
+# light-theme = "light"
+# dark-theme = "midnight"
+
+# Code highlighting theme. `termmd --list-themes` shows what is available.
+# On a 16-colour terminal termmd uses "ansi" by default, which follows your own
+# palette rather than fixing RGB values.
+# syntax-theme = "base16-ocean.dark"
+
+# Text width, and the blank columns kept at each side. Without `width`, termmd
+# uses the terminal width capped at 100 columns.
+# width = 100
+margin = 1
+
+# Rules under level 1 and 2 headings.
+heading-rules = true
+
+# Line numbers beside code blocks.
+line-numbers = false
+
+# Curly quotes, en and em dashes, ellipses.
+smart-punctuation = true
+
+# --- pager ------------------------------------------------------------------
+
+# Use the interactive pager when stdout is a terminal. A document that already
+# fits on one screen is printed rather than paged either way.
+pager = true
+
+# Whether termmd asks the terminal to report the mouse to it.
+#
+# Off by default, and worth understanding before turning on. With it off, your
+# terminal keeps the mouse: drag selects text, and the wheel still scrolls
+# because termmd enables alternate scroll (the terminal sends arrow keys).
+#
+# With it on, termmd sees clicks and can follow links itself -- including
+# in-document anchors and links to other local Markdown files, which a terminal
+# cannot do -- but click-drag selection needs `shift`. Press `m` to switch at any
+# time.
+mouse = false
+
+# --- images -----------------------------------------------------------------
+
+images = true
+
+# Force a protocol instead of detecting one:
+# kitty | iterm2 | sixel | blocks | none
+# image-protocol = "kitty"
+
+# Fetch images over http(s). Off by default: viewing a document should not make
+# network requests unless you ask for it.
+remote-images = false
+
+# The tallest an image may be, in terminal rows.
+max-image-rows = 24
+
+# Centre block images and their captions.
+center-figures = true
+
+# --- links and terminal -----------------------------------------------------
+
+# auto      OSC 8 hyperlinks when supported, otherwise inline URLs
+# hyperlink always OSC 8
+# inline    always print the URL next to the text
+# reference number the links and list them at the end
+# hide      link text only
+links = "auto"
+
+# auto | always | never | 16 | 256 | truecolor
+color = "auto"
+
+# auto | ascii | extended | full
+unicode = "auto"
+
+# Ask the terminal what it supports at startup. Turning this off skips a query
+# that costs up to 300ms on a terminal that never answers.
+probe = true
+
+# Columns a tab expands to inside code blocks.
+tab-width = 4
