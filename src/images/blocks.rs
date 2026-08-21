@@ -39,7 +39,14 @@ pub fn encode_with_depth(image: &RgbaImage, indent: u16, depth: ColorDepth) -> S
     for row in 0..h.div_ceil(2) {
         if row > 0 {
             sw.reset(&mut out);
-            out.push('\n');
+            // A carriage return as well as the line feed, because this is the
+            // one backend whose output spans several lines and the pager runs
+            // the terminal in raw mode. Raw mode turns off ONLCR, so a bare
+            // `\n` moves down without returning to column one and every row of
+            // the picture starts further right than the last -- a staircase of
+            // coloured blocks across the screen. Printing (not paging) hides
+            // the bug, because cooked mode adds the carriage return for us.
+            out.push_str("\r\n");
             out.push_str(&pad);
         }
         for x in 0..w {
@@ -157,6 +164,22 @@ mod tests {
         assert!(
             out.contains('\u{2584}'),
             "expected a lower half block: {out:?}"
+        );
+    }
+
+    #[test]
+    fn rows_are_separated_by_a_carriage_return_and_line_feed() {
+        // Regression: with a bare line feed this backend drew a staircase in
+        // the pager, because raw mode does not translate `\n` to `\r\n`.
+        let out = encode(&solid(3, 6, [9, 9, 9, 255]), 0);
+        assert!(
+            out.contains("\r\n"),
+            "rows must return to column one: {out:?}"
+        );
+        assert_eq!(
+            out.matches('\n').count(),
+            out.matches("\r\n").count(),
+            "every line feed needs its carriage return: {out:?}"
         );
     }
 

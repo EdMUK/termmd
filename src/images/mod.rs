@@ -337,7 +337,7 @@ impl Store {
 
         let sequence = match protocol {
             GraphicsProtocol::Kitty => kitty::encode(&cropped, cols, visible_rows, id),
-            GraphicsProtocol::ITerm2 => iterm2::encode(&cropped, cols, visible_rows),
+            GraphicsProtocol::ITerm2 => iterm2::encode(&cropped, cols, visible_rows, &image.url),
             GraphicsProtocol::Sixel => sixel::encode(&cropped.to_rgba8()),
             GraphicsProtocol::Blocks => Some(blocks::encode_with_depth(
                 &cropped.to_rgba8(),

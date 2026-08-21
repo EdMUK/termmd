@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Half-block images drew a staircase of colour across the pager instead of a
+  picture. The backend separated its rows with a bare line feed, and the pager
+  runs the terminal in raw mode, where that moves down without returning to
+  column one. Printing hid the bug, because cooked mode supplies the carriage
+  return. This affected every terminal without a pixel protocol, macOS
+  Terminal.app included.
+- The iTerm2 sequence carried no `name`, so the receiver had nothing but a
+  default of "Unnamed file" to identify the payload by, and could show a file
+  chip rather than the image. It now sends a `.png` name derived from the
+  source, and terminates with BEL as `imgcat` does.
+
 ## [0.1.0] - 2026-08-21
 
 First release.

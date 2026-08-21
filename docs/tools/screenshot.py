@@ -487,6 +487,11 @@ def main() -> None:
     parser.add_argument("--pager", action="store_true", help="capture the interactive pager")
     parser.add_argument("--keys", default="", help="keys to send once it has drawn")
     parser.add_argument("--title", default=None)
+    parser.add_argument(
+        "--protocol",
+        default="kitty",
+        help="image protocol to force (kitty renders as pixels; blocks as text)",
+    )
     parser.add_argument("--binary", default="./target/release/termmd")
     parser.add_argument("--wait", type=float, default=6.0)
     parser.add_argument(
@@ -495,7 +500,7 @@ def main() -> None:
     args = parser.parse_args()
 
     argv = [os.path.abspath(args.binary)]
-    argv += ["--images", "kitty", "--color", "truecolor", "--width", str(args.cols)]
+    argv += ["--images", args.protocol, "--color", "truecolor", "--width", str(args.cols)]
     argv += [] if args.pager else ["--no-pager"]
     argv += [args.source]
 
