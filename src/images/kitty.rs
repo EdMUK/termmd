@@ -54,7 +54,15 @@ pub fn encode_png(png: &[u8], cols: u16, rows: u16, id: u32) -> String {
                 "a=T,f=100,i={id},c={cols},r={rows},z=-1,C=1,q=2,m={more}"
             ));
         } else {
-            out.push_str(&format!("m={more}"));
+            // Every chunk repeats q=2, not just the first. The suppression key
+            // applies per escape code, and a terminal that treats each one
+            // independently will happily answer a continuation chunk that has
+            // not asked for silence -- iTerm2 replies `i=0;OK` to the final
+            // one. In the pager that reply is swallowed as input, but when
+            // printing, the terminal is not in raw mode and echoes it into the
+            // middle of the document. Only images large enough to be chunked
+            // showed the problem, which is what made it look intermittent.
+            out.push_str(&format!("i={id},q=2,m={more}"));
         }
         out.push(';');
         out.push_str(chunk);
@@ -128,6 +136,21 @@ mod tests {
             parts.last().unwrap().contains("m=0"),
             "last chunk must end the transfer"
         );
+    }
+
+    #[test]
+    fn every_chunk_asks_for_silence() {
+        // Regression: only the first chunk carried q=2, so a terminal that
+        // treats each escape code on its own answered the last one. The reply
+        // landed in the middle of the document, because printing does not put
+        // the terminal in raw mode and the reply was echoed.
+        let big = vec![0u8; CHUNK * 3];
+        let seq = encode_png(&big, 10, 5, 1);
+        for part in seq.split("\x1b_G").filter(|s| !s.is_empty()) {
+            let control = part.split(';').next().unwrap();
+            assert!(control.contains("q=2"), "chunk not silenced: {control}");
+            assert!(control.contains("i=1"), "chunk not attributable: {control}");
+        }
     }
 
     #[test]

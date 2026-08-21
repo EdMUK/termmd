@@ -4,7 +4,7 @@
 //!
 //! | Backend | Terminals | Notes |
 //! |---|---|---|
-//! | [`kitty`] | kitty, Ghostty, WezTerm, Konsole | PNG passthrough, exact placement |
+//! | [`kitty`] | kitty, Ghostty, WezTerm, Konsole, iTerm2 3.5+ | PNG passthrough, exact placement |
 //! | [`iterm2`] | iTerm2, WezTerm, mintty | inline file transfer |
 //! | [`sixel`] | foot, mlterm, xterm, Windows Terminal | our own encoder and quantiser |
 //! | [`blocks`] | anything with 256 colours | half blocks, always available |

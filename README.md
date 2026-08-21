@@ -214,7 +214,7 @@ files, which no terminal can do. `shift`-drag still selects while that is on, an
 | Terminal | Images | Colour | Hyperlinks |
 |:--|:--|:--|:--|
 | kitty, Ghostty, WezTerm | kitty protocol | truecolor | yes |
-| iTerm2 | iTerm2 protocol | truecolor | yes |
+| iTerm2 | kitty protocol (3.5+), else iTerm2 protocol | truecolor | yes |
 | foot, mlterm, xterm (`-ti vt340`) | sixel | truecolor | varies |
 | Windows Terminal, Konsole | sixel | truecolor | yes |
 | Alacritty, Terminal.app, anything else | half blocks | 256 or 16 | varies |
