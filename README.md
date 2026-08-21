@@ -97,8 +97,12 @@ Download an archive for your platform from the
 # macOS (Apple silicon); swap the target for your platform
 curl -sSL https://github.com/EdMUK/termmd/releases/latest/download/termmd-aarch64-apple-darwin.tar.gz \
   | tar xz
-sudo mv termmd /usr/local/bin/
+sudo install termmd-aarch64-apple-darwin/termmd /usr/local/bin/termmd
 ```
+
+The available targets are `aarch64-apple-darwin`, `x86_64-apple-darwin`,
+`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, and
+`x86_64-pc-windows-msvc`.
 
 Each release also has a `SHA256SUMS` file if you want to check the download.
 
