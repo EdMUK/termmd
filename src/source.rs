@@ -194,7 +194,16 @@ mod tests {
             urls.iter().all(|u| Path::new(u).is_absolute()),
             "got {urls:?}"
         );
-        assert!(urls[0].ends_with("one/img.png"), "got {}", urls[0]);
-        assert!(urls[1].ends_with("two/img.png"), "got {}", urls[1]);
+        // Compared as paths: the separator differs between platforms.
+        assert!(
+            Path::new(&urls[0]).ends_with("one/img.png"),
+            "got {}",
+            urls[0]
+        );
+        assert!(
+            Path::new(&urls[1]).ends_with("two/img.png"),
+            "got {}",
+            urls[1]
+        );
     }
 }

@@ -490,16 +490,26 @@ pub fn hyperlink_uri(target: &str) -> std::borrow::Cow<'_, str> {
     {
         return std::borrow::Cow::Borrowed(target);
     }
-    // Percent-encode the characters that would otherwise end the URI.
-    let mut encoded = String::with_capacity(target.len() + 8);
-    for byte in target.bytes() {
-        match byte {
-            b' ' => encoded.push_str("%20"),
-            b'"' => encoded.push_str("%22"),
-            b'#' => encoded.push_str("%23"),
-            b'?' => encoded.push_str("%3F"),
-            b'%' => encoded.push_str("%25"),
-            _ => encoded.push(byte as char),
+
+    // A file URI always uses forward slashes and always has a slash before the
+    // path, so a Windows path becomes `file:///C:/Users/...` rather than the
+    // `file://C:\Users\...` that a naive prefix would produce.
+    let mut path = target.replace('\\', "/");
+    if !path.starts_with('/') {
+        path.insert(0, '/');
+    }
+
+    // Percent-encode the characters that would otherwise end the URI or be
+    // read as part of its syntax.
+    let mut encoded = String::with_capacity(path.len() + 8);
+    for ch in path.chars() {
+        match ch {
+            ' ' => encoded.push_str("%20"),
+            '"' => encoded.push_str("%22"),
+            '#' => encoded.push_str("%23"),
+            '?' => encoded.push_str("%3F"),
+            '%' => encoded.push_str("%25"),
+            _ => encoded.push(ch),
         }
     }
     std::borrow::Cow::Owned(format!("file://{encoded}"))
@@ -568,10 +578,36 @@ mod tests {
         assert_eq!(hyperlink_uri("https://example.com"), "https://example.com");
         assert_eq!(hyperlink_uri("#anchor"), "#anchor");
         assert_eq!(hyperlink_uri("relative.md"), "relative.md");
+
+        // Built for whatever platform this is, rather than assuming a leading
+        // slash: on Windows an absolute path starts with a drive letter.
+        let absolute = std::path::absolute("notes.md").unwrap();
+        let uri = hyperlink_uri(absolute.to_str().unwrap());
+        assert!(uri.starts_with("file:///"), "got {uri}");
+        assert!(!uri.contains('\\'), "a URI uses forward slashes: {uri}");
+        assert!(uri.ends_with("notes.md"), "got {uri}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_uris_encode_awkward_characters() {
         assert_eq!(hyperlink_uri("/docs/notes.md"), "file:///docs/notes.md");
         assert_eq!(
             hyperlink_uri("/docs/my notes.md"),
             "file:///docs/my%20notes.md"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_become_well_formed_file_uris() {
+        assert_eq!(
+            hyperlink_uri(r"C:\docs\notes.md"),
+            "file:///C:/docs/notes.md"
+        );
+        assert_eq!(
+            hyperlink_uri(r"C:\docs\my notes.md"),
+            "file:///C:/docs/my%20notes.md"
         );
     }
 

@@ -337,9 +337,19 @@ fn rebase_url(url: &mut String, base: &std::path::Path) {
 #[cfg(test)]
 mod rebase_tests {
     use super::*;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+
+    /// An absolute directory for whatever platform this is: on Windows a path
+    /// needs a drive letter to count as absolute, so `/docs` will not do.
+    fn base() -> PathBuf {
+        std::path::absolute("docs").expect("a working directory")
+    }
 
     fn url_after_rebase(url: &str) -> String {
+        rebase_from(&base(), url)
+    }
+
+    fn rebase_from(base: &Path, url: &str) -> String {
         let mut doc = Document {
             blocks: vec![Block::Figure {
                 image: ImageRef {
@@ -350,7 +360,7 @@ mod rebase_tests {
             }],
             ..Default::default()
         };
-        rebase_urls(&mut doc, Path::new("/docs"));
+        rebase_urls(&mut doc, base);
         match &doc.blocks[0] {
             Block::Figure { image, .. } => image.url.clone(),
             _ => unreachable!(),
@@ -359,29 +369,15 @@ mod rebase_tests {
 
     #[test]
     fn makes_relative_paths_absolute() {
-        assert_eq!(url_after_rebase("img/logo.png"), "/docs/img/logo.png");
-        assert_eq!(url_after_rebase("./logo.png"), "/docs/logo.png");
-    }
-
-    #[test]
-    fn a_relative_base_still_yields_an_absolute_path() {
-        // The guard against a second base being applied further down the line.
-        let mut doc = Document {
-            blocks: vec![Block::Figure {
-                image: ImageRef {
-                    url: "images/x.png".into(),
-                    ..Default::default()
-                },
-                caption: Vec::new(),
-            }],
-            ..Default::default()
-        };
-        rebase_urls(&mut doc, Path::new("doc"));
-        let Block::Figure { image, .. } = &doc.blocks[0] else {
-            panic!()
-        };
-        assert!(Path::new(&image.url).is_absolute(), "got {}", image.url);
-        assert!(image.url.ends_with("doc/images/x.png"), "got {}", image.url);
+        // Compared as paths, not strings, so the separator does not matter.
+        assert_eq!(
+            Path::new(&url_after_rebase("img/logo.png")),
+            base().join("img/logo.png")
+        );
+        assert_eq!(
+            Path::new(&url_after_rebase("./logo.png")),
+            base().join("logo.png")
+        );
     }
 
     #[test]
@@ -399,6 +395,15 @@ mod rebase_tests {
     }
 
     #[test]
+    fn a_relative_base_still_yields_an_absolute_path() {
+        // The guard against a second base being applied further down the line.
+        let url = rebase_from(Path::new("doc"), "images/x.png");
+        let path = Path::new(&url);
+        assert!(path.is_absolute(), "got {url}");
+        assert!(path.ends_with("doc/images/x.png"), "got {url}");
+    }
+
+    #[test]
     fn rebases_inside_nested_blocks() {
         let mut doc = Document {
             blocks: vec![Block::BlockQuote {
@@ -411,13 +416,16 @@ mod rebase_tests {
             }],
             ..Default::default()
         };
-        rebase_urls(&mut doc, Path::new("/docs"));
+        rebase_urls(&mut doc, &base());
         let Block::BlockQuote { blocks, .. } = &doc.blocks[0] else {
             panic!()
         };
         let Block::Paragraph(inlines) = &blocks[0] else {
             panic!()
         };
-        assert!(matches!(&inlines[0], Inline::Link { dest, .. } if dest == "/docs/other.md"));
+        let Inline::Link { dest, .. } = &inlines[0] else {
+            panic!("expected a link")
+        };
+        assert_eq!(Path::new(dest), base().join("other.md"));
     }
 }

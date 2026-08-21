@@ -170,13 +170,13 @@ fn an_unknown_theme_is_rejected() {
 
 #[test]
 fn several_files_are_concatenated_and_labelled() {
-    let (out, _, ok) = run(&[
-        "--width",
-        "60",
-        &fixture("sample.md"),
-        &fixture("second.md"),
-    ]);
-    assert!(ok);
+    // Run from the fixtures directory and name the files relatively. The label
+    // echoes the path as typed, so an absolute path on a deep checkout wraps
+    // mid-filename at this width -- which says nothing about the behaviour
+    // under test, but does make the test fail on some machines and not others.
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let (out, err, ok) = run_in(&dir, &["--width", "60", "sample.md", "second.md"]);
+    assert!(ok, "stderr: {err}");
     assert!(out.contains("Sample Document"));
     assert!(out.contains("Second Document"));
     assert!(

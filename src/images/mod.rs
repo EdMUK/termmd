@@ -470,7 +470,7 @@ fn percent_decode(s: &str) -> Vec<u8> {
 /// Resolves an image reference against the document's directory.
 fn resolve_path(base: &Path, url: &str) -> Option<PathBuf> {
     let raw = url.split(['#', '?']).next().unwrap_or(url);
-    let raw = raw.strip_prefix("file://").unwrap_or(raw);
+    let raw = strip_file_scheme(raw);
     let decoded = String::from_utf8(percent_decode(raw)).unwrap_or_else(|_| raw.to_string());
     let path = Path::new(&decoded);
     let full = if path.is_absolute() {
@@ -479,6 +479,22 @@ fn resolve_path(base: &Path, url: &str) -> Option<PathBuf> {
         base.join(path)
     };
     full.exists().then_some(full)
+}
+
+/// Turns a `file://` URI back into a path.
+///
+/// A Windows file URI is `file:///C:/dir/x.png`, so stripping the scheme leaves
+/// a leading slash in front of the drive letter that has to go too.
+fn strip_file_scheme(url: &str) -> &str {
+    let Some(rest) = url.strip_prefix("file://") else {
+        return url;
+    };
+    let bytes = rest.as_bytes();
+    let drive_letter = bytes.len() >= 3
+        && bytes[0] == b'/'
+        && bytes[1].is_ascii_alphabetic()
+        && (bytes[2] == b':' || bytes[2] == b'|');
+    if drive_letter { &rest[1..] } else { rest }
 }
 
 /// Downloads an image over HTTP, with a timeout and a size cap.
@@ -598,6 +614,17 @@ mod tests {
                 ..Default::default()
             }),
             Some((4, 4))
+        );
+    }
+
+    #[test]
+    fn strips_the_file_scheme_including_windows_drive_letters() {
+        assert_eq!(strip_file_scheme("file:///docs/a.png"), "/docs/a.png");
+        assert_eq!(strip_file_scheme("file:///C:/docs/a.png"), "C:/docs/a.png");
+        assert_eq!(strip_file_scheme("a.png"), "a.png");
+        assert_eq!(
+            strip_file_scheme("https://example.com/a.png"),
+            "https://example.com/a.png"
         );
     }
 
