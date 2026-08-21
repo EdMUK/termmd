@@ -93,7 +93,10 @@ pub fn draw(out: &mut String, writer: &mut StyleWriter, panel: &Panel<'_>) {
         .saturating_sub(visible.saturating_sub(1))
         .min(panel.items.len().saturating_sub(visible));
 
-    let border = theme.table_border;
+    // Every cell the panel draws carries its background, so the panel is
+    // opaque over whatever is beneath it -- including an image.
+    let panel_bg = theme.panel;
+    let border = panel_bg.merge(theme.table_border);
     let mut row = top;
 
     // Top edge, with the title set into it.
@@ -114,7 +117,6 @@ pub fn draw(out: &mut String, writer: &mut StyleWriter, panel: &Panel<'_>) {
         place(out, row, left);
         writer.transition(border, out);
         out.push_str(g.v);
-        writer.reset(out);
 
         match panel.items.get(index) {
             Some(item) => {
@@ -122,7 +124,7 @@ pub fn draw(out: &mut String, writer: &mut StyleWriter, panel: &Panel<'_>) {
                 let style = if selected {
                     theme.search_current
                 } else {
-                    theme.text
+                    panel_bg.merge(theme.text)
                 };
                 let marker = if selected { ">" } else { " " };
 
@@ -143,7 +145,7 @@ pub fn draw(out: &mut String, writer: &mut StyleWriter, panel: &Panel<'_>) {
                 out.push(' ');
             }
             None => {
-                writer.transition(theme.text, out);
+                writer.transition(panel_bg, out);
                 out.push_str(&" ".repeat(inner_width + 2));
             }
         }

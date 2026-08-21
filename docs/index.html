@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>termmd — a Markdown viewer for capable terminals</title>
+<meta name="description" content="A Markdown viewer for terminals that can do more than plain text: real images through four protocols, tables that fit, real typography, and an interactive pager.">
+<meta property="og:title" content="termmd">
+<meta property="og:description" content="A Markdown viewer for terminals that can do more than plain text.">
+<meta property="og:image" content="https://edmuk.github.io/termmd/images/screenshot.png">
+<meta property="og:url" content="https://edmuk.github.io/termmd/">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --bg: #14171d;
+    --surface: #1b1f27;
+    --raised: #212734;
+    --line: #2f3746;
+    --fg: #dce3ea;
+    --muted: #8a94a3;
+    --faint: #5b6472;
+    --blue: #6fb3ff;
+    --magenta: #cfa4ff;
+    --green: #7bdc8a;
+    --orange: #ffa25c;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.65 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--blue); text-decoration-color: rgba(111,179,255,.35); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: var(--blue); }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+  code, kbd { font-family: var(--mono); font-size: .93em; }
+  kbd {
+    background: var(--raised); border: 1px solid var(--line); border-bottom-width: 2px;
+    border-radius: 5px; padding: 1px 6px; font-size: .82em; color: var(--fg);
+  }
+
+  /* Hero ------------------------------------------------------------- */
+  header { padding: 76px 0 8px; text-align: center; }
+  h1 {
+    font-family: var(--mono); font-size: clamp(2.6rem, 7vw, 4rem);
+    margin: 0 0 .1em; letter-spacing: -.03em; font-weight: 700;
+  }
+  h1 .prompt { color: var(--faint); }
+  .tagline { font-size: clamp(1.05rem, 2.5vw, 1.3rem); color: var(--muted); margin: 0 auto 30px; max-width: 34em; }
+  .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-bottom: 14px; }
+  .btn {
+    display: inline-block; padding: 10px 20px; border-radius: 8px; font-weight: 600;
+    text-decoration: none; font-size: .95rem; border: 1px solid var(--line);
+    background: var(--surface); color: var(--fg); transition: border-color .15s, background .15s;
+  }
+  .btn:hover { border-color: var(--faint); background: var(--raised); }
+  .btn.primary { background: var(--blue); color: #0d1117; border-color: var(--blue); }
+  .btn.primary:hover { background: #8cc2ff; border-color: #8cc2ff; }
+  .install {
+    display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono);
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 16px; color: var(--fg); font-size: .92rem; margin-top: 8px;
+  }
+  .install .prompt { color: var(--faint); user-select: none; }
+
+  /* Shots ------------------------------------------------------------ */
+  figure { margin: 44px 0 0; }
+  figure img {
+    width: 100%; height: auto; display: block; border-radius: 12px;
+    box-shadow: 0 24px 60px -18px rgba(0,0,0,.75), 0 0 0 1px rgba(255,255,255,.05);
+  }
+  figcaption { color: var(--muted); font-size: .88rem; text-align: center; margin-top: 14px; }
+
+  /* Sections --------------------------------------------------------- */
+  section { padding: 72px 0 0; }
+  h2 {
+    font-size: 1.55rem; margin: 0 0 8px; letter-spacing: -.02em;
+  }
+  h2 .hash { color: var(--faint); font-family: var(--mono); font-weight: 400; }
+  .lede { color: var(--muted); margin: 0 0 28px; max-width: 46em; }
+
+  .grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 22px;
+  }
+  .card h3 { margin: 0 0 8px; font-size: 1.02rem; display: flex; align-items: center; gap: 9px; }
+  .card p { margin: 0; color: var(--muted); font-size: .93rem; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+
+  table { width: 100%; border-collapse: collapse; font-size: .93rem; margin-top: 6px; }
+  th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: .82rem; text-transform: uppercase; letter-spacing: .05em; }
+  td code { color: var(--orange); }
+  tbody tr:last-child td { border-bottom: none; }
+  .scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+
+  pre {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px 20px; overflow-x: auto; margin: 0 0 16px; font-size: .9rem; line-height: 1.6;
+  }
+  pre .c { color: var(--faint); }
+  pre .p { color: var(--green); }
+
+  footer {
+    margin-top: 84px; padding: 32px 0 56px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: .89rem; display: flex; gap: 18px;
+    justify-content: space-between; flex-wrap: wrap;
+  }
+  footer a { color: var(--muted); }
+  @media (max-width: 640px) { header { padding-top: 52px; } section { padding-top: 54px; } }
+</style>
+</head>
+<body>
+
+<header class="wrap">
+  <h1><span class="prompt">$&nbsp;</span>termmd</h1>
+  <p class="tagline">A Markdown viewer for terminals that can do more than plain text.</p>
+  <div class="cta">
+    <a class="btn primary" href="https://github.com/EdMUK/termmd">GitHub</a>
+    <a class="btn" href="https://crates.io/crates/termmd">crates.io</a>
+    <a class="btn" href="https://github.com/EdMUK/termmd/releases/latest">Download</a>
+  </div>
+  <div><span class="install"><span class="prompt">$</span> cargo install termmd</span></div>
+</header>
+
+<div class="wrap">
+  <figure>
+    <img src="images/screenshot.png" alt="termmd rendering a Markdown document in a terminal: a heading, an inline image of coloured gradients and discs, a NOTE callout, a bordered table, and syntax-highlighted Rust.">
+    <figcaption>Real output, rendered from the escape sequences termmd actually emits — including the image, drawn through the kitty graphics protocol.</figcaption>
+  </figure>
+</div>
+
+<section class="wrap">
+  <h2><span class="hash">## </span>Why another one</h2>
+  <p class="lede">
+    Terminals quietly became capable. They do 24-bit colour, they draw images through
+    three different protocols, they have clickable hyperlinks, and they know how wide a
+    Japanese character is. Most terminal Markdown viewers were written before some of
+    that was true, and it shows: tables come out ragged or missing, images turn into
+    <code>[image]</code>, CJK text overflows the margin, and a wide table is simply cut off.
+  </p>
+  <div class="grid">
+    <div class="card">
+      <h3><span class="dot" style="background:var(--blue)"></span>Images, actually rendered</h3>
+      <p>Four backends, chosen by asking the terminal what it supports: the kitty graphics
+      protocol, iTerm2 inline images, DEC sixel, and Unicode half blocks. PNG, JPEG, GIF,
+      WebP, BMP, TIFF and SVG — vector art rasterised at the size it will be shown, so
+      badge text stays legible.</p>
+    </div>
+    <div class="card">
+      <h3><span class="dot" style="background:var(--magenta)"></span>Tables that fit</h3>
+      <p>Column widths are measured, not guessed. Spare room goes where it is needed; when
+      space runs short the prose column wraps while <code>1.2.0</code> and <code>Yes</code>
+      stay intact. Too narrow for a grid, and the table becomes readable records instead of
+      a mangled box.</p>
+    </div>
+    <div class="card">
+      <h3><span class="dot" style="background:var(--green)"></span>Typography</h3>
+      <p>Text is measured in display columns over grapheme clusters, so CJK, emoji and
+      combining accents wrap where they should. Lists hang their continuation lines under
+      the text. GitHub alerts get their own colour and label.</p>
+    </div>
+    <div class="card">
+      <h3><span class="dot" style="background:var(--orange)"></span>A real pager</h3>
+      <p>Search with live highlighting, a table of contents you can jump from, a link list,
+      horizontal scrolling for wide tables, and live reload on save. Links to other local
+      Markdown files open in termmd; <kbd>backspace</kbd> comes back.</p>
+    </div>
+    <div class="card">
+      <h3><span class="dot" style="background:var(--blue)"></span>Syntax highlighting</h3>
+      <p>213 languages and 32 themes through <a href="https://github.com/trishume/syntect">syntect</a>.
+      Fence languages resolve through aliases, and a block with no language at all is
+      sniffed from its first line.</p>
+    </div>
+    <div class="card">
+      <h3><span class="dot" style="background:var(--magenta)"></span>It degrades honestly</h3>
+      <p>Truecolor falls back to 256, then 16, then to bold and underline. Box drawing falls
+      back to ASCII. Every fallback can be forced, and <code>termmd --caps</code> shows what
+      was detected and why.</p>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2><span class="hash">## </span>The pager</h2>
+  <p class="lede">
+    Press <kbd>t</kbd> for the contents, <kbd>/</kbd> to search, <kbd>L</kbd> for links,
+    <kbd>i</kbd> to toggle images. The mouse belongs to your terminal, so drag still selects
+    and copies — the wheel scrolls through alternate scroll.
+  </p>
+  <figure style="margin-top:0">
+    <img src="images/screenshot-pager.png" alt="The termmd pager with the table of contents panel open over a document, showing headings indented by level with the current section highlighted.">
+  </figure>
+</section>
+
+<section class="wrap">
+  <h2><span class="hash">## </span>Terminal support</h2>
+  <p class="lede">Detection is by live query where possible: termmd asks the terminal what it
+  supports and only guesses from <code>TERM</code> when nothing answers.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Terminal</th><th>Images</th><th>Colour</th><th>Hyperlinks</th></tr></thead>
+      <tbody>
+        <tr><td>kitty, Ghostty, WezTerm</td><td>kitty protocol</td><td>truecolor</td><td>yes</td></tr>
+        <tr><td>iTerm2</td><td>iTerm2 protocol</td><td>truecolor</td><td>yes</td></tr>
+        <tr><td>foot, mlterm, xterm</td><td>sixel</td><td>truecolor</td><td>varies</td></tr>
+        <tr><td>Windows Terminal, Konsole</td><td>sixel</td><td>truecolor</td><td>yes</td></tr>
+        <tr><td>Alacritty, Terminal.app, others</td><td>half blocks</td><td>256 or 16</td><td>varies</td></tr>
+        <tr><td>tmux, screen</td><td>half blocks</td><td>inherited</td><td>inherited</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="lede" style="margin-top:20px">
+    Sixel is encoded by termmd itself, quantisation included: median cut over a 15-bit
+    histogram, Floyd–Steinberg dithering, run-length encoded output. No <code>libsixel</code>.
+  </p>
+</section>
+
+<section class="wrap">
+  <h2><span class="hash">## </span>Install</h2>
+  <pre><span class="c"># from crates.io</span>
+cargo install termmd
+
+<span class="c"># or a prebuilt binary (macOS, Linux, Windows)</span>
+curl -sSL https://github.com/EdMUK/termmd/releases/latest/download/termmd-aarch64-apple-darwin.tar.gz | tar xz
+sudo install termmd-aarch64-apple-darwin/termmd /usr/local/bin/termmd</pre>
+  <pre><span class="c"># then</span>
+termmd README.md          <span class="c"># interactive pager</span>
+termmd -P README.md       <span class="c"># print and exit</span>
+termmd --watch NOTES.md   <span class="c"># re-render on save</span>
+termmd --caps             <span class="c"># what termmd detected about your terminal</span></pre>
+  <p class="lede">
+    Piped output is plain text with no escape sequences, so <code>termmd doc.md | grep</code>
+    behaves. Full options, configuration and theming are in the
+    <a href="https://github.com/EdMUK/termmd#readme">README</a>.
+  </p>
+</section>
+
+<footer class="wrap">
+  <div>MIT licensed · built in Rust</div>
+  <div>
+    <a href="https://github.com/EdMUK/termmd">Source</a> ·
+    <a href="https://github.com/EdMUK/termmd/releases">Releases</a> ·
+    <a href="https://crates.io/crates/termmd">crates.io</a> ·
+    <a href="https://docs.rs/termmd">docs.rs</a>
+  </div>
+</footer>
+
+</body>
+</html>

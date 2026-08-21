@@ -56,5 +56,5 @@ project is released under.
 ## Adding a theme
 
 Themes are TOML files layered over a built-in base. Start from
-`doc/themes/example.toml`. Built-in themes live in `src/theme.rs` and should stay
+`docs/themes/example.toml`. Built-in themes live in `src/theme.rs` and should stay
 few: the point is that anyone can write their own without a rebuild.

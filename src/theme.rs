@@ -70,6 +70,10 @@ pub struct Theme {
     pub alerts: [Style; 5],
 
     // Pager chrome.
+    /// Background for overlay panels. Must be opaque: a panel is drawn over
+    /// whatever is on screen, including images, and a transparent one lets the
+    /// picture show through the text.
+    pub panel: Style,
     pub status_bar: Style,
     pub status_key: Style,
     pub search_match: Style,
@@ -188,6 +192,7 @@ impl Theme {
         t.caption = plain.italic().dim();
         t.math = plain.italic();
         t.alerts = [plain.bold(); 5];
+        t.panel = plain;
         t.status_bar = plain.reverse();
         t.status_key = plain.reverse().bold();
         t.search_match = plain.reverse();
@@ -247,6 +252,7 @@ impl Theme {
                 Style::PLAIN.fg(c(p.yellow)).bold(),
                 Style::PLAIN.fg(c(p.red)).bold(),
             ],
+            panel: Style::PLAIN.fg(c(p.fg)).bg(c(p.surface)),
             status_bar: Style::PLAIN.fg(c(p.fg)).bg(c(p.surface)),
             status_key: Style::PLAIN.fg(c(p.blue)).bg(c(p.surface)).bold(),
             search_match: Style::PLAIN.fg(c(p.surface)).bg(c(p.yellow)),
@@ -370,6 +376,7 @@ impl Theme {
             "caption" => &mut self.caption,
             "math" => &mut self.math,
             "heading_rule" => &mut self.heading_rule,
+            "panel" => &mut self.panel,
             "status_bar" => &mut self.status_bar,
             "status_key" => &mut self.status_key,
             "search_match" => &mut self.search_match,
@@ -418,6 +425,7 @@ const ROLES: &[&str] = &[
     "important",
     "warning",
     "caution",
+    "panel",
     "status_bar",
     "status_key",
     "search_match",
@@ -625,8 +633,8 @@ mod tests {
     #[test]
     fn the_shipped_example_theme_is_valid() {
         // Keeps the documented example honest: if a role is renamed, this fails.
-        let text = include_str!("../doc/themes/example.toml");
-        let theme = Theme::from_toml(text).expect("doc/themes/example.toml should parse");
+        let text = include_str!("../docs/themes/example.toml");
+        let theme = Theme::from_toml(text).expect("docs/themes/example.toml should parse");
         assert_eq!(theme.name, "example");
     }
 

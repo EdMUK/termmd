@@ -70,7 +70,7 @@ jobs:
           mkdir "$staging"
           cp "target/${{ matrix.target }}/release/termmd" "$staging/"
           cp README.md LICENSE CHANGELOG.md "$staging/"
-          cp doc/config.example.toml "$staging/"
+          cp docs/config.example.toml "$staging/"
           tar czf "$staging.tar.gz" "$staging"
           echo "ASSET=$staging.tar.gz" >> "$GITHUB_ENV"
         shell: bash
@@ -82,7 +82,7 @@ jobs:
           New-Item -ItemType Directory -Path $staging | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/termmd.exe" $staging
           Copy-Item README.md, LICENSE, CHANGELOG.md $staging
-          Copy-Item doc/config.example.toml $staging
+          Copy-Item docs/config.example.toml $staging
           Compress-Archive -Path $staging -DestinationPath "$staging.zip"
           "ASSET=$staging.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
         shell: pwsh

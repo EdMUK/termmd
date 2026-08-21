@@ -136,8 +136,8 @@ mod tests {
     #[test]
     fn the_shipped_example_config_is_valid() {
         // If a key is renamed, the documented example must be updated with it.
-        let text = include_str!("../doc/config.example.toml");
-        Config::from_toml(text).expect("doc/config.example.toml should parse");
+        let text = include_str!("../docs/config.example.toml");
+        Config::from_toml(text).expect("docs/config.example.toml should parse");
     }
 
     #[test]

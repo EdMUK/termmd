@@ -45,8 +45,13 @@ pub fn encode_png(png: &[u8], cols: u16, rows: u16, id: u32) -> String {
         if i == 0 {
             // a=T: transmit and display. q=2: stay quiet, so that a terminal
             // that does not understand us cannot spray a reply into the page.
+            //
+            // z=-1 places the image above the background but below the text.
+            // kitty's default, 0, draws it *over* the text, so anything the
+            // pager draws on top of a picture -- the contents panel, a search
+            // prompt -- would disappear behind it.
             out.push_str(&format!(
-                "a=T,f=100,i={id},c={cols},r={rows},C=1,q=2,m={more}"
+                "a=T,f=100,i={id},c={cols},r={rows},z=-1,C=1,q=2,m={more}"
             ));
         } else {
             out.push_str(&format!("m={more}"));
@@ -93,6 +98,10 @@ mod tests {
         assert_eq!(keys["r"], "2");
         assert_eq!(keys["i"], "7");
         assert_eq!(keys["C"], "1", "the cursor must not move");
+        assert_eq!(
+            keys["z"], "-1",
+            "text must draw over the image, not under it"
+        );
         assert_eq!(keys["m"], "0", "a single chunk is also the last chunk");
     }
 
