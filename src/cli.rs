@@ -184,6 +184,9 @@ pub struct Settings {
     pub remote_images: bool,
     pub protocol: GraphicsProtocol,
     pub syntax_theme: String,
+    /// Whether the pager was asked for explicitly, rather than chosen because
+    /// stdout happens to be a terminal.
+    pub pager_forced: bool,
     /// The width the user asked for, if any.
     ///
     /// Kept separate from the resolved width so that a resize can recompute
@@ -373,6 +376,7 @@ impl Settings {
             remote_images: cli.remote_images || config.remote_images.unwrap_or(false),
             protocol,
             syntax_theme,
+            pager_forced: cli.pager,
             requested_width,
         })
     }
@@ -534,6 +538,20 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("neon-dreams"), "{msg}");
         assert!(msg.contains("dark"), "should list the built-ins: {msg}");
+    }
+
+    #[test]
+    fn an_explicit_pager_flag_is_recorded() {
+        assert!(
+            Settings::resolve(&cli(&["--pager"]), &Config::default())
+                .unwrap()
+                .pager_forced
+        );
+        assert!(
+            !Settings::resolve(&cli(&[]), &Config::default())
+                .unwrap()
+                .pager_forced
+        );
     }
 
     #[test]

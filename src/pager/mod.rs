@@ -76,8 +76,11 @@ pub fn run(
     let document = build_document(sources, settings.parse);
     let screen = render(&document, settings, highlighter, store);
 
+    // `--pager` means the pager, even for a short document: the shortcut below
+    // is a convenience for the automatic case, not an override of an explicit
+    // request.
     let fits = screen.len() < settings.caps.rows.saturating_sub(1) as usize;
-    if fits && !watch {
+    if fits && !watch && !settings.pager_forced {
         let opts = WriteOptions {
             hyperlinks: settings.caps.hyperlinks,
             images: settings.render.images,
@@ -1102,6 +1105,7 @@ mod tests {
             remote_images: false,
             protocol: GraphicsProtocol::None,
             syntax_theme: String::new(),
+            pager_forced: false,
             requested_width: None,
         };
         Pager {

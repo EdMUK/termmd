@@ -225,6 +225,10 @@ fn remote_images_are_refused_by_default() {
 
 #[test]
 fn the_pager_refuses_to_run_without_a_terminal() {
+    // `--pager` is a request for the pager whatever the document's length, so
+    // this must fail rather than quietly printing a short file. Windows
+    // consoles report a size even with stdout redirected, which is how the
+    // shortcut used to swallow this.
     let (_, err, ok) = run(&["--pager", &fixture("sample.md")]);
     assert!(!ok);
     assert!(err.contains("terminal"), "should explain why: {err}");
