@@ -498,11 +498,7 @@ fn figure(image: &ImageRef, caption: &Inlines, ctx: &mut Ctx, width: usize) -> V
         let marker = ctx.glyphs().image_marker;
         let mut tokens = vec![
             Token::word(format!("{marker} "), ctx.theme.caption, None),
-            Token::word(
-                alt,
-                ctx.theme.link_text,
-                Some(link).filter(|_| ctx.use_osc8()),
-            ),
+            Token::word(alt, ctx.theme.link_text, ctx.use_osc8().then_some(link)),
         ];
         // Only ask when images are switched on: with them off there is no
         // failure to explain, and asking could start a download nobody wanted.
@@ -733,7 +729,7 @@ fn push_inline(
             out.push(Token::word(
                 format!("{marker} {label}"),
                 style.merge(ctx.theme.caption),
-                Some(id).filter(|_| ctx.use_osc8()),
+                ctx.use_osc8().then_some(id),
             ));
         }
         Inline::Link { dest, content, .. } => push_link(dest, content, ctx, style, out),

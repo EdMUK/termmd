@@ -14,6 +14,7 @@ use super::caps::{Capabilities, GraphicsProtocol};
 use super::style::Rgb;
 
 /// Total time we are willing to wait for replies.
+#[cfg(unix)]
 const TIMEOUT_MS: u64 = 300;
 
 /// What a probe managed to learn. Every field is optional: terminals answer
@@ -28,6 +29,9 @@ pub struct ProbeResult {
 }
 
 /// The query batch, ordered so that the Primary DA reply acts as a sentinel.
+///
+/// Only the unix probe sends these; Windows relies on the environment tier.
+#[cfg(unix)]
 fn queries() -> String {
     let mut q = String::new();
     // kitty graphics support: transmit a 1x1 RGB image by direct payload and
