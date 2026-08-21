@@ -28,8 +28,12 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
+          # Cross-compiled from the arm64 runner rather than built on an Intel
+          # one: GitHub's Intel macOS runners are on the way out, and the macOS
+          # SDK targets both architectures from either host.
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-latest
+            cross: true
           - target: aarch64-apple-darwin
             os: macos-latest
           - target: x86_64-pc-windows-msvc
@@ -50,9 +54,10 @@ jobs:
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
 
-      # A binary that cannot run is not worth shipping.
+      # A binary that cannot run is not worth shipping. Skipped for a
+      # cross-compiled target, which the host cannot execute.
       - name: Smoke test
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && !matrix.cross
         run: |
           ./target/${{ matrix.target }}/release/termmd --version
           ./target/${{ matrix.target }}/release/termmd -P --width 60 README.md > /dev/null
