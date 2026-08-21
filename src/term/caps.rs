@@ -201,6 +201,20 @@ impl Capabilities {
     }
 
     fn graphics_from_env(caps: &Self, term: &str, term_program: &str) -> GraphicsProtocol {
+        // Read the markers here and pass them down, so the decision itself is a
+        // pure function that tests can drive without mutating process-wide
+        // environment variables underneath each other.
+        let kitty_marker = env::var_os("KITTY_WINDOW_ID").is_some()
+            || env::var_os("GHOSTTY_RESOURCES_DIR").is_some();
+        Self::choose_graphics(caps, term, term_program, kitty_marker)
+    }
+
+    fn choose_graphics(
+        caps: &Self,
+        term: &str,
+        term_program: &str,
+        kitty_marker: bool,
+    ) -> GraphicsProtocol {
         if !caps.is_tty {
             return GraphicsProtocol::None;
         }
@@ -209,15 +223,23 @@ impl Capabilities {
         if caps.multiplexed {
             return GraphicsProtocol::Blocks;
         }
-        let kitty = term.contains("kitty")
-            || env::var_os("KITTY_WINDOW_ID").is_some()
-            || term_program.eq_ignore_ascii_case("ghostty")
-            || env::var_os("GHOSTTY_RESOURCES_DIR").is_some();
-        if kitty {
-            return GraphicsProtocol::Kitty;
+        // `TERM_PROGRAM` first, because whichever terminal is actually running
+        // sets it for itself. The marker variables below are weaker evidence:
+        // they are exported into every child process and survive into places
+        // their terminal did not follow, so a shell started under Ghostty still
+        // carries GHOSTTY_RESOURCES_DIR even when something else is drawing the
+        // screen. Letting those outrank an explicit TERM_PROGRAM sends kitty
+        // escape codes to a terminal that has never heard of them.
+        match term_program {
+            "iTerm.app" => return GraphicsProtocol::ITerm2,
+            "ghostty" | "Ghostty" => return GraphicsProtocol::Kitty,
+            "WezTerm" => return GraphicsProtocol::Kitty,
+            "Apple_Terminal" => return GraphicsProtocol::Blocks,
+            _ => {}
         }
-        if term_program == "iTerm.app" || term_program.eq_ignore_ascii_case("WezTerm") {
-            return GraphicsProtocol::ITerm2;
+
+        if term.contains("kitty") || kitty_marker {
+            return GraphicsProtocol::Kitty;
         }
         if term.contains("mlterm") || term.contains("yaft") || term.contains("foot") {
             return GraphicsProtocol::Sixel;
@@ -313,6 +335,73 @@ fn cell_size_px() -> Option<(u16, u16)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Decides a protocol for a made-up terminal, with no environment involved.
+    fn graphics_for(term: &str, term_program: &str, kitty_marker: bool) -> GraphicsProtocol {
+        let caps = Capabilities {
+            is_tty: true,
+            color: ColorDepth::TrueColor,
+            ..Default::default()
+        };
+        Capabilities::choose_graphics(&caps, term, term_program, kitty_marker)
+    }
+
+    #[test]
+    fn term_program_outranks_the_marker_variables() {
+        // Regression: KITTY_WINDOW_ID and GHOSTTY_RESOURCES_DIR are exported
+        // into every child process, so a shell that started life under one
+        // terminal keeps carrying them. TERM_PROGRAM says what is drawing now,
+        // and letting a stale marker beat it sends kitty escape codes to a
+        // terminal that has never heard of them.
+        assert_eq!(
+            graphics_for("xterm-256color", "iTerm.app", true),
+            GraphicsProtocol::ITerm2
+        );
+        assert_eq!(
+            graphics_for("xterm-256color", "Apple_Terminal", true),
+            GraphicsProtocol::Blocks
+        );
+        // With nothing better to go on, the marker still counts.
+        assert_eq!(
+            graphics_for("xterm-256color", "", true),
+            GraphicsProtocol::Kitty
+        );
+    }
+
+    #[test]
+    fn known_terminals_get_their_protocol() {
+        assert_eq!(
+            graphics_for("xterm-ghostty", "ghostty", false),
+            GraphicsProtocol::Kitty
+        );
+        assert_eq!(
+            graphics_for("xterm-kitty", "", false),
+            GraphicsProtocol::Kitty
+        );
+        assert_eq!(
+            graphics_for("wezterm", "WezTerm", false),
+            GraphicsProtocol::Kitty
+        );
+        assert_eq!(graphics_for("foot", "", false), GraphicsProtocol::Sixel);
+        assert_eq!(
+            graphics_for("xterm-256color", "", false),
+            GraphicsProtocol::Blocks
+        );
+    }
+
+    #[test]
+    fn a_multiplexer_falls_back_to_blocks() {
+        let caps = Capabilities {
+            is_tty: true,
+            multiplexed: true,
+            color: ColorDepth::TrueColor,
+            ..Default::default()
+        };
+        assert_eq!(
+            Capabilities::choose_graphics(&caps, "xterm-kitty", "ghostty", true),
+            GraphicsProtocol::Blocks
+        );
+    }
 
     #[test]
     fn graphics_names_are_stable() {

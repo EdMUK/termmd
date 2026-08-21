@@ -14,6 +14,10 @@ All notable changes to this project are documented here. The format follows
   column one. Printing hid the bug, because cooked mode supplies the carriage
   return. This affected every terminal without a pixel protocol, macOS
   Terminal.app included.
+- `TERM_PROGRAM` now outranks the marker environment variables when choosing a
+  graphics protocol. `KITTY_WINDOW_ID` and `GHOSTTY_RESOURCES_DIR` are exported
+  into every child process and outlive the terminal that set them, so a stale
+  one could send kitty escape codes to a terminal that had never heard of them.
 - The iTerm2 sequence carried no `name`, so the receiver had nothing but a
   default of "Unnamed file" to identify the payload by, and could show a file
   chip rather than the image. It now sends a `.png` name derived from the
