@@ -585,4 +585,318 @@ mod tests {
     fn empty_images_encode_to_nothing() {
         assert!(encode(&RgbaImage::new(0, 0)).is_none());
     }
+    // -- round trip ----------------------------------------------------------
+    //
+    // The tests above assert on the bytes we emit. That catches malformed
+    // output, but not output that is well formed and wrong: a repeat count one
+    // too high, a band that paints below the picture, a colour selected before
+    // it is defined. The only way to know an encoder works is to receive from
+    // it, so the rest of this module is a decoder -- the DCS header, the
+    // palette, `!` runs, `$` carriage returns and `-` newlines, read the way a
+    // terminal reads them -- and images pushed through both halves.
+
+    /// A sixel sequence decoded back into pixels.
+    struct Decoded {
+        /// The size the raster attributes declared.
+        width: usize,
+        height: usize,
+        /// Row-major over a canvas larger than the declared raster, so that
+        /// anything painted outside it shows up instead of being clipped.
+        canvas: Vec<Option<[u8; 3]>>,
+        canvas_w: usize,
+        canvas_h: usize,
+    }
+
+    impl Decoded {
+        fn at(&self, x: usize, y: usize) -> Option<[u8; 3]> {
+            self.canvas[y * self.canvas_w + x]
+        }
+
+        /// Pixels painted beyond the size the sequence declared.
+        fn painted_outside(&self) -> Vec<(usize, usize)> {
+            let mut out = Vec::new();
+            for y in 0..self.canvas_h {
+                for x in 0..self.canvas_w {
+                    if (x >= self.width || y >= self.height)
+                        && self.canvas[y * self.canvas_w + x].is_some()
+                    {
+                        out.push((x, y));
+                    }
+                }
+            }
+            out
+        }
+    }
+
+    /// Reads a decimal parameter, returning it and the index after it.
+    fn number(bytes: &[u8], mut i: usize) -> (u32, usize) {
+        let mut n = 0u32;
+        while let Some(d) = bytes.get(i).filter(|b| b.is_ascii_digit()) {
+            n = n * 10 + u32::from(d - b'0');
+            i += 1;
+        }
+        (n, i)
+    }
+
+    /// Sets the pixels one sixel character stands for.
+    fn paint(d: &mut Decoded, x: usize, band: usize, bits: u8, rgb: [u8; 3]) {
+        for row in 0..6 {
+            if bits & (1 << row) == 0 {
+                continue;
+            }
+            let y = band * 6 + row;
+            assert!(
+                x < d.canvas_w && y < d.canvas_h,
+                "sixel data ran off the canvas at ({x}, {y})"
+            );
+            d.canvas[y * d.canvas_w + x] = Some(rgb);
+        }
+    }
+
+    fn decode(seq: &str) -> Decoded {
+        let body = seq
+            .strip_prefix("\x1bP")
+            .and_then(|s| s.strip_suffix("\x1b\\"))
+            .expect("a sixel image is a DCS terminated by ST");
+        let (_, data) = body
+            .split_once('q')
+            .expect("the sixel data follows a `q` introducer");
+        let bytes = data.as_bytes();
+        let mut i = 0;
+
+        // Raster attributes: "Pan;Pad;Ph;Pv, of which the last two are the size.
+        let (mut width, mut height) = (0usize, 0usize);
+        if bytes.first() == Some(&b'"') {
+            i = 1;
+            let mut params = Vec::new();
+            loop {
+                let (n, next) = number(bytes, i);
+                params.push(n);
+                i = next;
+                if bytes.get(i) == Some(&b';') {
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            assert_eq!(params.len(), 4, "raster attributes take four parameters");
+            width = params[2] as usize;
+            height = params[3] as usize;
+        }
+
+        // Room to spare on both axes. A terminal would clip; we would rather
+        // see the mistake.
+        let (canvas_w, canvas_h) = (width + 8, height + 12);
+        let mut d = Decoded {
+            width,
+            height,
+            canvas: vec![None; canvas_w * canvas_h],
+            canvas_w,
+            canvas_h,
+        };
+
+        let mut palette = [None; 256];
+        let mut color = 0usize;
+        let mut x = 0usize;
+        let mut band = 0usize;
+
+        while i < bytes.len() {
+            match bytes[i] {
+                b'#' => {
+                    let (n, next) = number(bytes, i + 1);
+                    color = n as usize;
+                    assert!(color < 256, "colour register {color} is out of range");
+                    i = next;
+                    if bytes.get(i) == Some(&b';') {
+                        // A definition rather than a selection.
+                        let mut params = Vec::new();
+                        while bytes.get(i) == Some(&b';') {
+                            let (n, next) = number(bytes, i + 1);
+                            params.push(n);
+                            i = next;
+                        }
+                        assert_eq!(
+                            params.len(),
+                            4,
+                            "a colour takes a space and three components"
+                        );
+                        assert_eq!(params[0], 2, "components should be declared as RGB");
+                        // Components are percentages on the wire.
+                        let byte = |p: u32| {
+                            assert!(p <= 100, "a component of {p}% is out of range");
+                            ((p * 255 + 50) / 100) as u8
+                        };
+                        palette[color] = Some([byte(params[1]), byte(params[2]), byte(params[3])]);
+                    }
+                }
+                b'!' => {
+                    let (count, next) = number(bytes, i + 1);
+                    let ch = *bytes.get(next).expect("a run must be followed by a sixel");
+                    assert!(
+                        (0x3f..=0x7e).contains(&ch),
+                        "a run repeats a sixel, not {:?}",
+                        ch as char
+                    );
+                    let rgb = palette[color].expect("a colour must be defined before it is used");
+                    for _ in 0..count {
+                        paint(&mut d, x, band, ch - 0x3f, rgb);
+                        x += 1;
+                    }
+                    i = next + 1;
+                }
+                // Graphics carriage return: back to the left of the same band.
+                b'$' => {
+                    x = 0;
+                    i += 1;
+                }
+                // Graphics newline: down to the next band.
+                b'-' => {
+                    x = 0;
+                    band += 1;
+                    i += 1;
+                }
+                ch @ 0x3f..=0x7e => {
+                    let rgb = palette[color].expect("a colour must be defined before it is used");
+                    paint(&mut d, x, band, ch - 0x3f, rgb);
+                    x += 1;
+                    i += 1;
+                }
+                other => panic!("unexpected byte {:?} in sixel data", other as char),
+            }
+        }
+        d
+    }
+
+    /// Asserts that every pixel came back, within the one step of drift the
+    /// wire format imposes: colour components travel as percentages, and
+    /// rounding a byte to the nearest of a hundred steps and back moves it by
+    /// at most one. Anything looser would stop policing the rounding itself.
+    const DRIFT: i32 = 1;
+
+    #[track_caller]
+    fn assert_same(image: &RgbaImage, decoded: &Decoded) {
+        assert_eq!(
+            (decoded.width, decoded.height),
+            (image.width() as usize, image.height() as usize),
+            "the raster attributes should state the image's size"
+        );
+        for (x, y, px) in image.enumerate_pixels() {
+            let got = decoded
+                .at(x as usize, y as usize)
+                .unwrap_or_else(|| panic!("pixel ({x}, {y}) was never drawn"));
+            for c in 0..3 {
+                let drift = i32::from(got[c]) - i32::from(px.0[c]);
+                assert!(
+                    drift.abs() <= DRIFT,
+                    "pixel ({x}, {y}) came back {got:?}, not {:?}",
+                    &px.0[..3]
+                );
+            }
+        }
+    }
+
+    /// Six colours far enough apart to survive quantisation untouched.
+    fn patchwork(w: u32, h: u32) -> RgbaImage {
+        const COLORS: [[u8; 3]; 6] = [
+            [220, 40, 40],
+            [40, 200, 80],
+            [60, 90, 230],
+            [240, 220, 40],
+            [20, 20, 20],
+            [250, 250, 250],
+        ];
+        let mut img = RgbaImage::new(w, h);
+        for (x, y, px) in img.enumerate_pixels_mut() {
+            let c = COLORS[(x as usize / 3 + y as usize / 2) % COLORS.len()];
+            *px = Rgba([c[0], c[1], c[2], 255]);
+        }
+        img
+    }
+
+    #[test]
+    fn a_decoded_image_matches_the_one_encoded() {
+        // Colours from a small, well separated palette are reproduced exactly:
+        // median cut keeps them, and dithering has no error to spread.
+        let img = patchwork(17, 13);
+        assert_same(&img, &decode(&encode(&img).unwrap()));
+    }
+
+    #[test]
+    fn nothing_is_painted_below_the_last_row() {
+        // Thirteen rows is two full bands and a third holding a single row. A
+        // sixel is six pixels tall whatever the picture does, so the five bits
+        // under that last row must be left clear -- a terminal would paint them.
+        let img = patchwork(9, 13);
+        let decoded = decode(&encode(&img).unwrap());
+        assert_eq!(
+            decoded.painted_outside(),
+            Vec::new(),
+            "pixels were painted outside the declared raster"
+        );
+        assert_same(&img, &decoded);
+    }
+
+    #[test]
+    fn transparency_survives_the_round_trip() {
+        let mut img = RgbaImage::from_pixel(10, 8, Rgba([30, 160, 220, 255]));
+        for y in 0..8 {
+            for x in 0..10 {
+                if (x + y) % 3 == 0 {
+                    img.put_pixel(x, y, Rgba([0, 0, 0, 0]));
+                }
+            }
+        }
+        let decoded = decode(&encode(&img).unwrap());
+        for (x, y, px) in img.enumerate_pixels() {
+            assert_eq!(
+                decoded.at(x as usize, y as usize).is_some(),
+                px.0[3] >= ALPHA_THRESHOLD,
+                "pixel ({x}, {y}) was not left as it should be"
+            );
+        }
+    }
+
+    #[test]
+    fn runs_expand_to_the_columns_they_came_from() {
+        // One odd column in a long uniform run: a repeat count out by one moves
+        // the stripe, which the shape of the output cannot show.
+        let mut img = RgbaImage::from_pixel(120, 6, Rgba([15, 15, 15, 255]));
+        for y in 0..6 {
+            img.put_pixel(73, y, Rgba([240, 240, 240, 255]));
+        }
+        let seq = encode(&img).unwrap();
+        assert!(seq.contains('!'), "a run of 73 should have been compressed");
+        assert_same(&img, &decode(&seq));
+    }
+
+    #[test]
+    fn a_gradient_round_trips_within_tolerance() {
+        // More distinct colours than registers, so this exercises median cut
+        // and dithering as well as the wire format. Dithering deliberately
+        // trades per-pixel accuracy for the look of the whole, so the bound is
+        // on the average.
+        let img = gradient(64, 40);
+        let decoded = decode(&encode(&img).unwrap());
+        let (mut total, mut count) = (0u64, 0u64);
+        for (x, y, px) in img.enumerate_pixels() {
+            let got = decoded
+                .at(x as usize, y as usize)
+                .unwrap_or_else(|| panic!("pixel ({x}, {y}) was never drawn"));
+            for (got, want) in got.iter().zip(px.0.iter()) {
+                total += (i32::from(*got) - i32::from(*want)).unsigned_abs() as u64;
+                count += 1;
+            }
+        }
+        let mean = total / count;
+        assert!(mean <= 4, "mean channel error of {mean} is too high");
+    }
+
+    #[test]
+    fn a_single_row_image_round_trips() {
+        // One row in a band of six: the other five bits stay clear.
+        let img = patchwork(24, 1);
+        let decoded = decode(&encode(&img).unwrap());
+        assert_eq!(decoded.painted_outside(), Vec::new());
+        assert_same(&img, &decoded);
+    }
 }

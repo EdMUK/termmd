@@ -3,9 +3,14 @@
 
 This is not a mockup. It runs termmd on a pty, parses the escape sequences it
 actually emits -- colours, attributes, cursor movement -- into a grid of cells,
-and draws that grid with a monospace font. Images transmitted through the kitty
-graphics protocol are decoded from the escape stream and composited at the exact
-cell position termmd placed them, so what you see is what a terminal shows.
+and draws that grid with a monospace font. Images are decoded from the escape
+stream -- kitty graphics, and sixel through the decoder below -- and composited
+at the exact cell position termmd placed them, so what you see is what a terminal
+shows.
+
+Decoding sixel here is worth the hundred lines: it is the one protocol termmd
+encodes itself, pixel by pixel and colour by colour, so a screenshot taken with
+`--protocol sixel` is a picture of what its own encoder produced.
 
 The pty is given pixel dimensions matching the font metrics, so termmd sizes its
 images for the same cell geometry the renderer draws with.
@@ -113,8 +118,9 @@ class Grid:
 class Terminal:
     """Just enough of a terminal to reproduce what termmd draws."""
 
-    def __init__(self, rows: int, cols: int):
+    def __init__(self, rows: int, cols: int, cell: tuple[int, int] = (1, 1)):
         self.grid = Grid(rows, cols)
+        self.cell = cell
         self.row = 0
         self.col = 0
         self.style = Style()
@@ -234,8 +240,9 @@ class Terminal:
             body = data[i + 2 : end if end != -1 else len(data)]
             self._kitty_chunk(body)
             return (end + 2) if end != -1 else len(data)
-        if nxt == b"P":  # sixel and other DCS: skipped, not used in these shots
+        if nxt == b"P":  # DCS, which for termmd means a sixel image.
             end = data.find(b"\x1b\\", i)
+            self._sixel(data[i + 2 : end if end != -1 else len(data)])
             return (end + 2) if end != -1 else len(data)
         if nxt == b"7":
             self.saved = (self.row, self.col)
@@ -271,6 +278,100 @@ class Terminal:
                 self.grid.cells.pop((self.row, c), None)
         elif final == "J":
             self.grid.cells.clear()
+
+    # -- sixel -------------------------------------------------------------
+
+    _SIXEL_COLOUR = re.compile(rb"(\d+)(?:;(\d+);(\d+);(\d+);(\d+))?")
+    _SIXEL_REPEAT = re.compile(rb"(\d+)([\x3f-\x7e])")
+
+    def _sixel(self, body: bytes) -> None:
+        """Decode a sixel image and place it where the cursor is.
+
+        Six pixels to a character, one bit each, over a palette of colour
+        registers: `#Pc` selects one and `#Pc;2;r;g;b` defines it in percent,
+        `!Pn` repeats the next sixel, `$` returns to the left of the band and
+        `-` starts the next one. Bits that are zero are left alone, which is
+        what carries transparency.
+        """
+        _, _, data = body.partition(b"q")
+        # Raster attributes give the true size; without them there is nothing
+        # to allocate, since sixel data itself never states a width.
+        match = re.match(rb'"(\d+);(\d+);(\d+);(\d+)', data)
+        if not match:
+            return
+        width, height = int(match.group(3)), int(match.group(4))
+        if width <= 0 or height <= 0:
+            return
+
+        picture = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        pixels = picture.load()
+        palette: dict[int, tuple] = {}
+        colour = 0
+        x = band = 0
+        i = match.end()
+
+        def put(bits: int, at: int) -> None:
+            rgb = palette.get(colour)
+            if rgb is None or at >= width:
+                return
+            for row in range(6):
+                if bits & (1 << row):
+                    y = band * 6 + row
+                    if y < height:
+                        pixels[at, y] = (*rgb, 255)
+
+        while i < len(data):
+            byte = data[i]
+            if byte == 0x23:  # '#'
+                match = self._SIXEL_COLOUR.match(data, i + 1)
+                if not match:
+                    break
+                colour = int(match.group(1))
+                if match.group(2) == b"2":
+                    # Components are percentages on the wire.
+                    palette[colour] = tuple(
+                        round(int(v) * 255 / 100) for v in match.group(3, 4, 5)
+                    )
+                i = match.end()
+            elif byte == 0x21:  # '!'
+                match = self._SIXEL_REPEAT.match(data, i + 1)
+                if not match:
+                    break
+                bits = match.group(2)[0] - 0x3F
+                for _ in range(int(match.group(1))):
+                    put(bits, x)
+                    x += 1
+                i = match.end()
+            elif byte == 0x24:  # '$', graphics carriage return
+                x = 0
+                i += 1
+            elif byte == 0x2D:  # '-', graphics newline
+                x = 0
+                band += 1
+                i += 1
+            elif 0x3F <= byte <= 0x7E:
+                put(byte - 0x3F, x)
+                x += 1
+                i += 1
+            else:
+                i += 1
+
+        buffer = io.BytesIO()
+        picture.save(buffer, "PNG")
+        cell_w, cell_h = self.cell
+        self.grid.images.append(
+            Placement(
+                self.row,
+                self.col,
+                -(-width // max(cell_w, 1)),
+                -(-height // max(cell_h, 1)),
+                buffer.getvalue(),
+                # Sixel pixels go down before the text, so anything the pager
+                # draws over them -- a panel, a search prompt -- stays legible,
+                # as it does on a terminal that redraws those cells afterwards.
+                z=-1,
+            )
+        )
 
     def _kitty_chunk(self, body: bytes) -> None:
         """Reassemble a kitty graphics transmission and record its placement."""
@@ -490,7 +591,7 @@ def main() -> None:
     parser.add_argument(
         "--protocol",
         default="kitty",
-        help="image protocol to force (kitty renders as pixels; blocks as text)",
+        help="image protocol to force: kitty and sixel render as pixels, blocks as text",
     )
     parser.add_argument("--binary", default="./target/release/termmd")
     parser.add_argument("--wait", type=float, default=6.0)
@@ -511,7 +612,7 @@ def main() -> None:
     keys = args.keys.encode().decode("unicode_escape").encode("latin1")
     data = capture(argv, args.rows, args.cols, cell, keys, args.wait, args.delay)
 
-    terminal = Terminal(args.rows, args.cols)
+    terminal = Terminal(args.rows, args.cols, cell)
     terminal.feed(data)
     title = args.title or f"termmd {args.source}"
     render(terminal.grid, title, args.output)
