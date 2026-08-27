@@ -13,6 +13,9 @@ All notable changes to this project are documented here. The format follows
   generated from the same definition the flags are parsed with, so neither can
   describe a termmd you do not have; both write to stdout without touching the
   terminal, so redirecting one into a file cannot capture a capability probe.
+- Release archives carry the man page and the five completion scripts. They are
+  generated once per release rather than per target, because the cross-compiled
+  macOS build cannot run its own binary to produce them.
 - `cargo binstall termmd` fetches the release archive rather than compiling.
   The manifest pins the naming the release workflow uses, which none of
   binstall's defaults match.

@@ -17,8 +17,49 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Completions and the man page are the same bytes whatever the target, and
+  # the cross-compiled one cannot run its own binary to produce them. So they
+  # are generated once, here, and packaged into every archive.
+  manual:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Generate
+        run: |
+          mkdir -p generated/completions
+          cargo run --quiet --locked -- --man > generated/termmd.1
+          # Named as clap_complete names them, which is what every shell's
+          # completion directory expects to find.
+          cargo run --quiet --locked -- --completions bash \
+            > generated/completions/termmd.bash
+          cargo run --quiet --locked -- --completions zsh \
+            > generated/completions/_termmd
+          cargo run --quiet --locked -- --completions fish \
+            > generated/completions/termmd.fish
+          cargo run --quiet --locked -- --completions powershell \
+            > generated/completions/_termmd.ps1
+          cargo run --quiet --locked -- --completions elvish \
+            > generated/completions/termmd.elv
+          # Empty output would package silently; a man page without a title
+          # would not.
+          grep -q '^\.TH termmd 1' generated/termmd.1
+          grep -q '^#compdef termmd' generated/completions/_termmd
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manual
+          path: generated
+          if-no-files-found: error
+
   build:
     name: ${{ matrix.target }}
+    needs: manual
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -54,6 +95,11 @@ jobs:
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: manual
+          path: generated
+
       # A binary that cannot run is not worth shipping. Skipped for a
       # cross-compiled target, which the host cannot execute.
       - name: Smoke test
@@ -61,6 +107,8 @@ jobs:
         run: |
           ./target/${{ matrix.target }}/release/termmd --version
           ./target/${{ matrix.target }}/release/termmd -P --width 60 README.md > /dev/null
+          ./target/${{ matrix.target }}/release/termmd --man > /dev/null
+          ./target/${{ matrix.target }}/release/termmd --completions zsh > /dev/null
         shell: bash
 
       - name: Package (unix)
@@ -71,6 +119,8 @@ jobs:
           cp "target/${{ matrix.target }}/release/termmd" "$staging/"
           cp README.md LICENSE CHANGELOG.md "$staging/"
           cp docs/config.example.toml "$staging/"
+          cp generated/termmd.1 "$staging/"
+          cp -r generated/completions "$staging/"
           tar czf "$staging.tar.gz" "$staging"
           echo "ASSET=$staging.tar.gz" >> "$GITHUB_ENV"
         shell: bash
@@ -83,13 +133,15 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/termmd.exe" $staging
           Copy-Item README.md, LICENSE, CHANGELOG.md $staging
           Copy-Item docs/config.example.toml $staging
+          Copy-Item generated/termmd.1 $staging
+          Copy-Item generated/completions $staging -Recurse
           Compress-Archive -Path $staging -DestinationPath "$staging.zip"
           "ASSET=$staging.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
         shell: pwsh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target }}
+          name: archive-${{ matrix.target }}
           path: ${{ env.ASSET }}
           if-no-files-found: error
 
@@ -99,8 +151,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Archives only: the generated man page and completions travel inside
+      # them, and have no business being release assets of their own.
       - uses: actions/download-artifact@v4
         with:
+          pattern: archive-*
           path: artifacts
           merge-multiple: true
 

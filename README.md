@@ -97,6 +97,10 @@ The available targets are `aarch64-apple-darwin`, `x86_64-apple-darwin`,
 `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, and
 `x86_64-pc-windows-msvc`.
 
+Each archive carries the man page as `termmd.1` and completion scripts for five
+shells under `completions/`, alongside the README, the licence and an example
+config.
+
 Each release also has a `SHA256SUMS` file if you want to check the download.
 
 macOS may quarantine a binary downloaded with a browser. If it refuses to run:
@@ -145,8 +149,9 @@ termmd docs/demo.md  # everything it can draw, in one document
 
 ### Completions and the man page
 
-Both are written by the binary itself, from the same definition the flags are
-parsed with, so neither can describe a version of termmd you do not have:
+A release archive already contains both. Otherwise the binary writes them
+itself, from the same definition the flags are parsed with, so neither can
+describe a version of termmd you do not have:
 
 ```sh
 termmd --completions zsh > ~/.zfunc/_termmd          # or bash, fish, powershell, elvish
