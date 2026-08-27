@@ -111,6 +111,13 @@ xattr -d com.apple.quarantine /usr/local/bin/termmd
 cargo install termmd
 ```
 
+Or [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall), which takes
+the release archive above rather than compiling:
+
+```sh
+cargo binstall termmd
+```
+
 Or straight from the repository, which does not wait on a crates.io release:
 
 ```sh
@@ -134,6 +141,16 @@ care about badges.
 ```sh
 termmd --caps        # what termmd detected about your terminal
 termmd docs/demo.md  # everything it can draw, in one document
+```
+
+### Completions and the man page
+
+Both are written by the binary itself, from the same definition the flags are
+parsed with, so neither can describe a version of termmd you do not have:
+
+```sh
+termmd --completions zsh > ~/.zfunc/_termmd          # or bash, fish, powershell, elvish
+termmd --man > /usr/local/share/man/man1/termmd.1
 ```
 
 ## Usage
@@ -176,6 +193,8 @@ behaves. Use `--color=always` to keep the colour through a pipe.
 | `-n`, `--line-numbers` | Line numbers beside code blocks. |
 | `--ascii` | Draw with ASCII only. |
 | `--watch` | Re-render when the file changes. |
+| `--completions <SHELL>` | Write a completion script to stdout. |
+| `--man` | Write the man page, as roff, to stdout. |
 
 ### Keys
 

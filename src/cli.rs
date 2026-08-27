@@ -107,6 +107,14 @@ pub struct Cli {
     #[arg(long)]
     pub list_languages: bool,
 
+    /// Write a completion script for a shell to stdout and exit.
+    #[arg(long, value_name = "SHELL")]
+    pub completions: Option<clap_complete::Shell>,
+
+    /// Write the man page, as roff, to stdout and exit.
+    #[arg(long)]
+    pub man: bool,
+
     /// Use a specific config file, or `none` to ignore any config.
     #[arg(long, value_name = "PATH")]
     pub config: Option<String>,

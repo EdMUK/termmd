@@ -14,6 +14,17 @@ keywords = ["markdown", "terminal", "cli", "viewer", "ansi"]
 categories = ["command-line-utilities", "text-processing"]
 exclude = [".github/*"]
 
+# `cargo binstall termmd` downloads the release archive instead of building.
+# Pinned rather than left to binstall's defaults, none of which match how the
+# release workflow names and lays out an archive.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
 [[bin]]
 name = "termmd"
 path = "src/main.rs"
@@ -32,6 +43,10 @@ unicode-width = "0.2"
 unicode-segmentation = "1.12"
 base64 = "0.23"
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
+# `--completions` and `--man` generate from the same `Command` clap parses
+# with, so what they describe cannot drift from what the program accepts.
+clap_complete = "4.5"
+clap_mangen = "0.2"
 serde = { version = "1", features = ["derive"] }
 toml = "1"
 dirs = "6"

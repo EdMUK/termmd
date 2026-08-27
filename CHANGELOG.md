@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `--completions <SHELL>` writes a completion script for bash, zsh, fish,
+  PowerShell or elvish, and `--man` writes the man page as roff. Both are
+  generated from the same definition the flags are parsed with, so neither can
+  describe a termmd you do not have; both write to stdout without touching the
+  terminal, so redirecting one into a file cannot capture a capability probe.
+- `cargo binstall termmd` fetches the release archive rather than compiling.
+  The manifest pins the naming the release workflow uses, which none of
+  binstall's defaults match.
+
 ## [0.1.1] - 2026-08-21
 
 Bug fixes, all of them found by running termmd on terminals its author had not:

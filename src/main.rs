@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 
 use termmd::cli::{Cli, Settings};
 use termmd::config::Config;
@@ -23,6 +23,17 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
+
+    // Before anything reads the config or speaks to the terminal. Both of these
+    // write something meant to be redirected into a file, and the capability
+    // probe would put escape sequences in the middle of it.
+    if let Some(shell) = cli.completions {
+        return write_completions(shell);
+    }
+    if cli.man {
+        return write_man_page();
+    }
+
     let config = load_config(&cli)?;
     let settings = Settings::resolve(&cli, &config)?;
 
@@ -118,6 +129,74 @@ fn print_screen(screen: &Screen, settings: &Settings, store: &mut Store) -> Resu
     screen.write(&mut out, &settings.caps, &opts, store)?;
     Ok(())
 }
+
+/// Writes a shell's completion script to stdout.
+///
+/// Generated from the same `Command` clap parses with, rather than checked in,
+/// so a flag added here cannot be missing there.
+fn write_completions(shell: clap_complete::Shell) -> Result<()> {
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    clap_complete::generate(shell, &mut Cli::command(), "termmd", &mut out);
+    Ok(out.flush()?)
+}
+
+/// Writes the man page to stdout, as roff.
+///
+/// Assembled section by section rather than in one call, so that FILES lands
+/// where a reader expects it rather than after the version.
+fn write_man_page() -> Result<()> {
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    // A fuller description than `--help` carries: a man page is read cold, by
+    // someone who has not necessarily run the program yet.
+    let command = Cli::command().long_about(MAN_DESCRIPTION);
+    let man = clap_mangen::Man::new(command).manual(String::from("termmd manual"));
+
+    man.render_title(&mut out)?;
+    man.render_name_section(&mut out)?;
+    man.render_synopsis_section(&mut out)?;
+    man.render_description_section(&mut out)?;
+    man.render_options_section(&mut out)?;
+    out.write_all(MAN_FILES.as_bytes())?;
+    man.render_version_section(&mut out)?;
+    Ok(out.flush()?)
+}
+
+const MAN_DESCRIPTION: &str = "\
+termmd renders Markdown for terminals that can do more than plain text: images \
+through the kitty, iTerm2 or sixel protocols, or Unicode half blocks where none \
+of those are available; tables measured to fit the width; syntax highlighting; \
+and an interactive pager with search, a table of contents and live reload.
+
+With no FILE, or with -, it reads standard input. Several files are concatenated \
+and labelled. Output through a pipe carries no escape sequences unless --color \
+says otherwise, and the pager is used only when stdout is a terminal and the \
+document does not fit on one screen.
+
+What termmd draws depends on what it detects, which --caps reports.";
+
+/// The one section clap cannot know about: where termmd looks for things.
+///
+/// Everything else a reader might want -- the pager's keys, the theme format --
+/// is a moving target better read from `H` in the pager and the README than
+/// from roff that would quietly fall out of date.
+const MAN_FILES: &str = r#".SH FILES
+.TP
+.I ~/.config/termmd/config.toml
+Configuration. Overridden by \fB--config\fR, or by \fITERMMD_CONFIG\fR in the
+environment. \fB--config none\fR ignores it.
+.TP
+.I ~/.config/termmd/themes/
+Theme files, selected by name with \fB--theme\fR.
+.SH NOTES
+Press \fBH\fR in the pager for its keys. Remote images are not fetched unless
+\fB--remote-images\fR is given.
+.SH SEE ALSO
+Full documentation at
+.UR https://github.com/EdMUK/termmd
+.UE
+"#;
 
 fn load_config(cli: &Cli) -> Result<Config> {
     match cli.config.as_deref() {

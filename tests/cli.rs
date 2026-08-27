@@ -370,3 +370,64 @@ fn local_document_links_are_emitted_as_file_uris() {
         "expected a file:// hyperlink:\n{out}"
     );
 }
+
+#[test]
+fn writes_completion_scripts() {
+    for (shell, marker) in [
+        ("bash", "_termmd()"),
+        ("zsh", "#compdef termmd"),
+        ("fish", "complete -c termmd"),
+        ("elvish", "termmd"),
+        ("powershell", "termmd"),
+    ] {
+        let (out, err, ok) = run(&["--completions", shell]);
+        assert!(ok, "--completions {shell} failed: {err}");
+        assert!(
+            out.contains(marker),
+            "the {shell} script should contain {marker:?}: {out}"
+        );
+        // A completion script is redirected into a file, so a stray escape
+        // sequence from the capability probe would be written into it.
+        assert!(
+            !out.contains('\x1b'),
+            "the {shell} script carries an escape sequence"
+        );
+        // Generated from the parser itself, so a flag added without touching
+        // this test still turns up. Named without its dashes, because fish
+        // spells a long option `-l remote-images`.
+        assert!(
+            out.contains("remote-images"),
+            "the {shell} script is missing a flag termmd accepts"
+        );
+    }
+
+    let (_, err, ok) = run(&["--completions", "tcsh"]);
+    assert!(!ok, "an unsupported shell should be an error");
+    assert!(
+        err.contains("tcsh"),
+        "the error should name the shell: {err}"
+    );
+}
+
+#[test]
+fn writes_a_man_page() {
+    let (out, err, ok) = run(&["--man"]);
+    assert!(ok, "--man failed: {err}");
+    assert!(out.starts_with(".ie"), "roff starts with its own preamble");
+    for section in [".TH termmd 1", ".SH NAME", ".SH SYNOPSIS", ".SH OPTIONS"] {
+        assert!(
+            out.contains(section),
+            "the man page has no {section}: {out}"
+        );
+    }
+    // The hand-written sections, which clap knows nothing about.
+    assert!(out.contains(".SH FILES") && out.contains("config.toml"));
+    assert!(
+        !out.contains('\x1b'),
+        "the man page carries an escape sequence"
+    );
+    assert!(
+        out.contains("--remote-images"),
+        "the man page is missing a flag termmd accepts"
+    );
+}

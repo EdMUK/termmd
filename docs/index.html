@@ -233,6 +233,9 @@
   <pre><span class="c"># from crates.io</span>
 cargo install termmd
 
+<span class="c"># or the release archive, without compiling</span>
+cargo binstall termmd
+
 <span class="c"># or a prebuilt binary (macOS, Linux, Windows)</span>
 curl -sSL https://github.com/EdMUK/termmd/releases/latest/download/termmd-aarch64-apple-darwin.tar.gz | tar xz
 sudo install termmd-aarch64-apple-darwin/termmd /usr/local/bin/termmd</pre>
@@ -241,7 +244,10 @@ termmd README.md               <span class="c"># interactive pager</span>
 termmd -P README.md            <span class="c"># print and exit</span>
 termmd --remote-images R.md    <span class="c"># fetch http(s) images — off by default</span>
 termmd --watch NOTES.md        <span class="c"># re-render on save</span>
-termmd --caps                  <span class="c"># what termmd detected about your terminal</span></pre>
+termmd --caps                  <span class="c"># what termmd detected about your terminal</span>
+
+termmd --completions zsh &gt; ~/.zfunc/_termmd          <span class="c"># bash, fish, powershell, elvish too</span>
+termmd --man &gt; /usr/local/share/man/man1/termmd.1</pre>
 
   <h3 style="font-size:1.05rem;margin:26px 0 8px">If a picture is missing</h3>
   <p class="lede">
