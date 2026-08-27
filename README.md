@@ -80,6 +80,15 @@ underline. Box drawing falls back to ASCII. Every fallback can be forced, and
 
 ## Install
 
+### Homebrew
+
+```sh
+brew install EdMUK/tap/termmd
+```
+
+The formula takes the prebuilt binary for your platform rather than compiling,
+on macOS and Linux, Intel and Arm.
+
 ### Prebuilt binaries
 
 Download an archive for your platform from the
