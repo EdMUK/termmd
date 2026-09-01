@@ -52,6 +52,11 @@ the table becomes a list of records rather than a mangled box.
 GitHub accepts. Code spans and code blocks keep the name, and so does `--ascii`,
 where there is nothing to draw it with.
 
+**Maths, as far as Unicode goes.** `$E = mc^2$` renders as `E = mc²`,
+`\frac{a+b}{2}` as `(a+b)/2`, `\alpha \leq \beta` as `α ≤ β`. What has no
+character — a matrix, a fifth root, a superscript Unicode never encoded — is
+left exactly as it was written, because a reader can still read TeX.
+
 **Typography.** Text is measured in display columns over grapheme clusters, so
 CJK, emoji, and combining accents wrap where they should. Lists hang their
 continuation lines under the text. Quotes carry a bar down the whole block.

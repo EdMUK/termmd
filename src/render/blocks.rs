@@ -593,10 +593,26 @@ fn measure_image(image: &ImageRef, ctx: &mut Ctx, width: usize) -> Option<(u16, 
 fn display_math(text: &str, ctx: &mut Ctx, width: usize) -> Vec<Line> {
     let mut lines = Vec::new();
     for raw in text.trim().lines() {
-        let tokens = vec![Token::word(raw.trim(), ctx.theme.math, None)];
+        let tokens = vec![Token::word(
+            math_text(raw.trim(), ctx),
+            ctx.theme.math,
+            None,
+        )];
         lines.extend(wrap(&tokens, width, Align::Center));
     }
     lines
+}
+
+/// TeX as far as the terminal can take it.
+///
+/// An ASCII terminal has nothing to write `x²` with, and `x^2` is what the
+/// author wrote, so it keeps that.
+fn math_text(source: &str, ctx: &Ctx) -> String {
+    if ctx.caps.unicode == UnicodeLevel::Full {
+        super::math::to_unicode(source)
+    } else {
+        source.to_string()
+    }
 }
 
 fn definition_list(items: &[(Inlines, Vec<Vec<Block>>)], ctx: &mut Ctx, width: usize) -> Vec<Line> {
@@ -712,9 +728,11 @@ fn push_inline(
             out.push(Token::word("_", ctx.theme.muted, link));
             push_inlines(c, ctx, style, link, out);
         }
-        Inline::Math { text, .. } => {
-            out.push(Token::word(text.clone(), style.merge(ctx.theme.math), link))
-        }
+        Inline::Math { text, .. } => out.push(Token::word(
+            math_text(text, ctx),
+            style.merge(ctx.theme.math),
+            link,
+        )),
         Inline::Html(_) => {}
         Inline::SoftBreak => out.push(Token::space(style)),
         Inline::HardBreak => out.push(Token::hard_break()),
@@ -880,6 +898,22 @@ mod tests {
             2,
             "code spans and code blocks keep the shortcode: {out}"
         );
+    }
+
+    #[test]
+    fn math_is_written_in_unicode_where_there_is_some() {
+        let out = text_unicode("$E = mc^2$ and $\\alpha \\leq \\beta$\n");
+        assert!(out.contains("E = mc²"), "{out}");
+        assert!(out.contains("α ≤ β"), "{out}");
+
+        let display = text_unicode("$$\\frac{a+b}{2} \\times \\sqrt{c}$$\n");
+        assert!(display.contains("(a+b)/2 × √c"), "{display}");
+    }
+
+    #[test]
+    fn math_keeps_its_source_on_an_ascii_terminal() {
+        let out = text("$E = mc^2$\n");
+        assert!(out.contains("E = mc^2"), "{out}");
     }
 
     #[test]

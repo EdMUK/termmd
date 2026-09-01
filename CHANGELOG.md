@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Maths is rendered into Unicode where Unicode has the characters: scripts
+  (`x^2` becomes `x²`), Greek, the comparison and set operators, roots,
+  fractions, and blackboard letters. Anything else -- an unknown command, a
+  script with no character, a matrix -- passes through as written, which is
+  still readable TeX.
 - `:shortcode:` emoji, from the alias set GitHub accepts. Expanded at render
   time rather than at parse time, so a code span, a code block and `--ascii` all
   keep the name they were written with.
