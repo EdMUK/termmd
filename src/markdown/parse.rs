@@ -91,6 +91,13 @@ pub fn parse(source: &str, options: ParseOptions) -> Document {
 }
 
 /// A half-built node on the stack.
+/// How deep a document may nest before the tree stops getting deeper.
+///
+/// A hundred is far past anything written on purpose -- a list inside a quote
+/// inside a footnote is four -- and far short of what a recursive walk over the
+/// result cannot survive.
+const MAX_DEPTH: usize = 100;
+
 enum Frame {
     Paragraph {
         inlines: Inlines,
@@ -166,6 +173,8 @@ enum Frame {
 struct Builder {
     options: ParseOptions,
     stack: Vec<Frame>,
+    /// Opened containers we declined to nest, waiting for their closes.
+    suppressed: usize,
     blocks: Vec<Block>,
     footnotes: Vec<(String, Vec<Block>)>,
     slugger: Slugger,
@@ -177,6 +186,7 @@ impl Builder {
         Self {
             options,
             stack: Vec::new(),
+            suppressed: 0,
             blocks: Vec::new(),
             footnotes: Vec::new(),
             slugger: Slugger::new(),
@@ -209,8 +219,29 @@ impl Builder {
 
     fn event(&mut self, event: Event<'_>) {
         match event {
-            Event::Start(tag) => self.start(tag),
-            Event::End(tag) => self.end(tag),
+            Event::Start(tag) => {
+                // Past this depth the document stops becoming a deeper tree and
+                // its contents join the block already open. Every consumer of
+                // the tree walks it recursively -- rendering, rebasing URLs,
+                // even dropping it -- so without a floor here a document of
+                // fifty thousand nested quotes takes the stack with it, and
+                // since a document can now arrive from a URL that is not only
+                // a thing people do to themselves.
+                if self.stack.len() >= MAX_DEPTH {
+                    self.suppressed += 1;
+                    return;
+                }
+                self.start(tag)
+            }
+            Event::End(tag) => {
+                // The close of a start we did not take: they nest, so the ones
+                // we skipped are the innermost and close first.
+                if self.suppressed > 0 {
+                    self.suppressed -= 1;
+                    return;
+                }
+                self.end(tag)
+            }
             Event::Text(t) => {
                 if let Some(Frame::CodeBlock { code, .. }) = self.stack.last_mut() {
                     code.push_str(&t);
@@ -710,6 +741,76 @@ mod tests {
 
     fn doc(src: &str) -> Document {
         parse(src, ParseOptions::default())
+    }
+
+    #[test]
+    fn nesting_has_a_floor() {
+        // Every walk over the tree recurses -- rendering, rebasing URLs,
+        // dropping it -- so the tree itself has to stop getting deeper. This
+        // used to take the stack with it, and a document can arrive from a URL.
+        let deep = format!("{}deep\n", "> ".repeat(50_000));
+        let doc = parse(&deep, ParseOptions::default());
+
+        // Nothing is lost: the text is still in there, just not 50,000 quotes
+        // down.
+        let text = crate::markdown::ir_plain_text(&collect_inlines(&doc.blocks));
+        assert!(text.contains("deep"), "got {text:?}");
+        // One more than the cap: the innermost paragraph counts as a level
+        // here, where the parser's floor counts open frames.
+        let depth = depth_of(&doc.blocks);
+        assert!(depth <= MAX_DEPTH + 1, "{depth} levels deep");
+    }
+
+    #[test]
+    fn inline_nesting_has_the_same_floor() {
+        let deep = format!("{}a{}\n", "*".repeat(20_000), "*".repeat(20_000));
+        let doc = parse(&deep, ParseOptions::default());
+        assert!(depth_of(&doc.blocks) <= MAX_DEPTH + 1);
+    }
+
+    /// The deepest chain of blocks in a tree.
+    fn depth_of(blocks: &[Block]) -> usize {
+        blocks
+            .iter()
+            .map(|block| match block {
+                Block::BlockQuote { blocks, .. } | Block::FootnoteDefinition { blocks, .. } => {
+                    1 + depth_of(blocks)
+                }
+                Block::List(list) => {
+                    1 + list
+                        .items
+                        .iter()
+                        .map(|i| depth_of(&i.blocks))
+                        .max()
+                        .unwrap_or(0)
+                }
+                _ => 1,
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Every inline in a tree, flattened, for asserting nothing was dropped.
+    fn collect_inlines(blocks: &[Block]) -> Inlines {
+        let mut out = Vec::new();
+        for block in blocks {
+            match block {
+                Block::Paragraph(inlines)
+                | Block::Heading {
+                    content: inlines, ..
+                } => out.extend(inlines.clone()),
+                Block::BlockQuote { blocks, .. } | Block::FootnoteDefinition { blocks, .. } => {
+                    out.extend(collect_inlines(blocks))
+                }
+                Block::List(list) => {
+                    for item in &list.items {
+                        out.extend(collect_inlines(&item.blocks));
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
     }
 
     #[test]

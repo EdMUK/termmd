@@ -6,6 +6,34 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Deeply nested input crashed rather than rendering. Fifty thousand nested
+  quotes, list items or emphasis markers took the stack down with them, and so
+  did a formula with that many nested braces -- every walk over the document
+  tree recurses, dropping it included. Both now have a floor: past a hundred
+  levels a document stops nesting and its contents join the block already open,
+  and past sixty-four a formula is copied as written. Nothing is lost either
+  way, and since a document can now arrive from a URL, this is no longer only
+  something people could do to themselves.
+- A superscript or subscript that was a command took only the backslash, so
+  `x^\alpha` came out unchanged and `y^\frac{1}{2}` came out as `y^\frac12`,
+  with the braces dropped and the meaning with them. A command is now one
+  thing, arguments and all: `x^α` and `y^½`.
+- A directory index took a `#` comment inside a leading code block for the
+  file's heading, so a document that opens with a shell snippet was listed
+  under the wrong title.
+- `holds_markdown` followed symlinks while deciding whether to list a
+  subdirectory, and a cycle of them was stopped only by paths eventually
+  growing too long to open. It descends into real directories now, eight deep.
+- A protocol-relative URL in a fetched document (`//host/x.png`) resolved
+  against the wrong host.
+- A link to a URL whose *host* ends in `.md` was fetched as a document rather
+  than handed to the browser.
+- Square brackets in a filename broke the link the directory index generated.
+- `termmd big.md | head` reported "Broken pipe (os error 32)" and exited
+  non-zero. A reader who stops reading is not a failure.
+
 ### Added
 
 - `y` in the pager copies the code block on screen to the system clipboard over

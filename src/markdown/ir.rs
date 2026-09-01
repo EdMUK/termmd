@@ -371,6 +371,10 @@ fn join_url(document: &str, relative: &str) -> Option<String> {
         None => (rest, ""),
     };
 
+    // `//host/path` names its own host and keeps only the scheme.
+    if let Some(rest) = relative.strip_prefix("//") {
+        return Some(format!("{scheme}://{rest}"));
+    }
     let joined = if let Some(absolute) = relative.strip_prefix('/') {
         absolute.to_string()
     } else {
@@ -413,6 +417,78 @@ mod rebase_tests {
     /// needs a drive letter to count as absolute, so `/docs` will not do.
     fn base() -> PathBuf {
         std::path::absolute("docs").expect("a working directory")
+    }
+
+    #[test]
+    fn a_remote_documents_relative_urls_resolve_against_it() {
+        let doc = UrlBase::Url("https://example.com/repo/docs/README.md");
+        assert_eq!(
+            rebase_against(doc, "img.png"),
+            "https://example.com/repo/docs/img.png"
+        );
+        assert_eq!(
+            rebase_against(doc, "./img.png"),
+            "https://example.com/repo/docs/img.png"
+        );
+        assert_eq!(
+            rebase_against(doc, "../img.png"),
+            "https://example.com/repo/img.png"
+        );
+        assert_eq!(
+            rebase_against(doc, "../../img.png"),
+            "https://example.com/img.png"
+        );
+        // Above the root is still the root, not an error.
+        assert_eq!(
+            rebase_against(doc, "../../../../img.png"),
+            "https://example.com/img.png"
+        );
+        assert_eq!(
+            rebase_against(doc, "/img.png"),
+            "https://example.com/img.png"
+        );
+        assert_eq!(
+            rebase_against(doc, "sub/img.png"),
+            "https://example.com/repo/docs/sub/img.png"
+        );
+    }
+
+    #[test]
+    fn a_remote_base_ignores_its_own_query_and_fragment() {
+        let doc = UrlBase::Url("https://example.com/a/b.md?raw=1#top");
+        assert_eq!(rebase_against(doc, "c.png"), "https://example.com/a/c.png");
+        // The relative reference keeps its own, which is how raw hosts work.
+        assert_eq!(
+            rebase_against(doc, "c.png?raw=1"),
+            "https://example.com/a/c.png?raw=1"
+        );
+    }
+
+    #[test]
+    fn a_remote_base_with_no_path_still_works() {
+        assert_eq!(
+            rebase_against(UrlBase::Url("https://example.com"), "a.png"),
+            "https://example.com/a.png"
+        );
+        assert_eq!(
+            rebase_against(UrlBase::Url("https://example.com/"), "a.png"),
+            "https://example.com/a.png"
+        );
+        assert_eq!(
+            rebase_against(UrlBase::Url("https://example.com/dir/"), "a.png"),
+            "https://example.com/dir/a.png"
+        );
+    }
+
+    #[test]
+    fn a_protocol_relative_url_keeps_its_host() {
+        assert_eq!(
+            rebase_against(
+                UrlBase::Url("https://example.com/a/b.md"),
+                "//cdn.example/x.png"
+            ),
+            "https://cdn.example/x.png"
+        );
     }
 
     fn url_after_rebase(url: &str) -> String {

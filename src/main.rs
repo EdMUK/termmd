@@ -14,11 +14,25 @@ use termmd::render::{Highlighter, NoImages, Screen, WriteOptions};
 
 fn main() {
     if let Err(error) = run() {
+        // `termmd big.md | head` closes the pipe halfway through, which is not
+        // a failure and should not be reported as one: the reader got what
+        // they asked for and stopped reading.
+        if is_broken_pipe(&error) {
+            return;
+        }
         // `{:#}` prints the whole context chain on one line, which is what a
         // command-line tool should say rather than a Rust backtrace.
         eprintln!("termmd: {error:#}");
         std::process::exit(1);
     }
+}
+
+/// Whether a failure is just the other end of the pipe going away.
+fn is_broken_pipe(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .any(|io| io.kind() == std::io::ErrorKind::BrokenPipe)
 }
 
 fn run() -> Result<()> {

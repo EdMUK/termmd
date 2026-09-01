@@ -490,3 +490,32 @@ fn a_url_that_is_not_a_url_is_still_a_path() {
     assert!(!ok);
     assert!(err.contains("/no/such/directory/at/all"), "{err}");
 }
+
+#[test]
+fn a_closed_pipe_is_not_an_error() {
+    // `termmd big.md | head` is an ordinary thing to type, and it used to end
+    // with "termmd: Broken pipe (os error 32)" and a non-zero exit.
+    let path = std::env::temp_dir().join("termmd-cli-broken-pipe.md");
+    let big: String = (0..4000)
+        .map(|i| format!("## Section {i}\n\nSome text in section {i}.\n\n"))
+        .collect();
+    std::fs::write(&path, big).unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_termmd"))
+        .args(["-P", "--width", "60", path.to_str().unwrap()])
+        .env("TERM", "xterm-256color")
+        .env("TERMMD_CONFIG", "/nonexistent/termmd.toml")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to run termmd");
+
+    // The reader goes away with the document half written.
+    drop(child.stdout.take());
+    let out = child.wait_with_output().unwrap();
+
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.is_empty(), "nothing to report: {err}");
+    assert!(out.status.success(), "and nothing to fail about");
+}

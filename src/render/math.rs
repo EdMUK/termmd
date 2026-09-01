@@ -13,24 +13,36 @@
 //! untouched. A reader who sees `\begin{pmatrix}` has lost nothing, and a reader
 //! who sees `x²` has gained something.
 
+/// How deep a formula may nest before we stop reading and start copying.
+///
+/// Groups nest by recursion here, and a formula is a string rather than part
+/// of the document tree, so it needs its own floor. Sixty-four is past any
+/// formula and short of any stack.
+const MAX_DEPTH: usize = 64;
+
 /// Translates the parts of TeX that a line of terminal text can hold.
 pub(super) fn to_unicode(source: &str) -> String {
-    convert(&source.chars().collect::<Vec<_>>())
+    convert(&source.chars().collect::<Vec<_>>(), MAX_DEPTH)
 }
 
-fn convert(src: &[char]) -> String {
+fn convert(src: &[char], depth: usize) -> String {
+    // Deeper than anyone means, so the rest is left exactly as it was written,
+    // which is what this module does with everything it will not translate.
+    if depth == 0 {
+        return src.iter().collect();
+    }
     let mut out = String::with_capacity(src.len());
     let mut i = 0;
     while i < src.len() {
         match src[i] {
-            '\\' => i = command(src, i, &mut out),
-            '^' => i = script(src, i, &mut out, superscript),
-            '_' => i = script(src, i, &mut out, subscript),
+            '\\' => i = command(src, i, &mut out, depth),
+            '^' => i = script(src, i, &mut out, superscript, depth),
+            '_' => i = script(src, i, &mut out, subscript, depth),
             // A group that is not attached to anything keeps only its contents:
             // `{a}` and `a` mean the same thing, and one of them is readable.
             '{' => match group(src, i) {
                 Some((body, next)) => {
-                    out.push_str(&convert(body));
+                    out.push_str(&convert(body, depth - 1));
                     i = next;
                 }
                 None => {
@@ -48,7 +60,7 @@ fn convert(src: &[char]) -> String {
 }
 
 /// Handles a `\command`, returning where to carry on from.
-fn command(src: &[char], start: usize, out: &mut String) -> usize {
+fn command(src: &[char], start: usize, out: &mut String, depth: usize) -> usize {
     let mut end = start + 1;
     while end < src.len() && src[end].is_ascii_alphabetic() {
         end += 1;
@@ -61,7 +73,10 @@ fn command(src: &[char], start: usize, out: &mut String) -> usize {
         "frac" | "dfrac" | "tfrac" => {
             if let Some((numerator, after)) = group(src, skip_spaces(src, end)) {
                 if let Some((denominator, next)) = group(src, skip_spaces(src, after)) {
-                    out.push_str(&fraction(&convert(numerator), &convert(denominator)));
+                    out.push_str(&fraction(
+                        &convert(numerator, depth - 1),
+                        &convert(denominator, depth - 1),
+                    ));
                     return next;
                 }
             }
@@ -81,7 +96,7 @@ fn command(src: &[char], start: usize, out: &mut String) -> usize {
                 at = skip_spaces(src, after);
             }
             if let Some((body, next)) = group(src, at) {
-                let body = convert(body);
+                let body = convert(body, depth - 1);
                 out.push(sign);
                 out.push_str(&wrap_if_compound(&body));
                 return next;
@@ -92,13 +107,13 @@ fn command(src: &[char], start: usize, out: &mut String) -> usize {
         "mathbb" => {
             if let Some((body, next)) = group(src, skip_spaces(src, end)) {
                 let text: String = body.iter().collect();
-                out.push_str(&blackboard(&text).unwrap_or_else(|| convert(body)));
+                out.push_str(&blackboard(&text).unwrap_or_else(|| convert(body, depth - 1)));
                 return next;
             }
         }
         "text" | "mathrm" | "mathbf" | "mathit" | "mathsf" | "operatorname" => {
             if let Some((body, next)) = group(src, skip_spaces(src, end)) {
-                out.push_str(&convert(body));
+                out.push_str(&convert(body, depth - 1));
                 return next;
             }
         }
@@ -160,17 +175,32 @@ fn passthrough(src: &[char], start: usize, end: usize, out: &mut String) -> usiz
     at
 }
 
-/// Handles `^` or `_`, which take either a group or the single next character.
-fn script(src: &[char], start: usize, out: &mut String, map: fn(char) -> Option<char>) -> usize {
+/// Handles `^` or `_`, which take a group, a command, or the next character.
+fn script(
+    src: &[char],
+    start: usize,
+    out: &mut String,
+    map: fn(char) -> Option<char>,
+    depth: usize,
+) -> usize {
     let at = start + 1;
-    let (body, next) = match group(src, at) {
-        Some((body, next)) => (body.to_vec(), next),
-        None if at < src.len() => (vec![src[at]], at + 1),
-        None => return at,
+    let (body, next) = if let Some((body, next)) = group(src, at) {
+        (body.to_vec(), next)
+    } else if src.get(at) == Some(&'\\') {
+        // A command is a single thing, arguments and all: the script in
+        // `x^\alpha` is a letter, and the one in `y^\frac{1}{2}` is a
+        // fraction. Taking only the backslash would leave the name behind as
+        // ordinary text and strip the braces off what followed.
+        let end = command_extent(src, at);
+        (src[at..end].to_vec(), end)
+    } else if at < src.len() {
+        (vec![src[at]], at + 1)
+    } else {
+        return at;
     };
 
     // Convert first: `x^\alpha` has a script that is a command.
-    let converted = convert(&body);
+    let converted = convert(&body, depth - 1);
     match converted.chars().map(map).collect::<Option<String>>() {
         Some(scripted) => out.push_str(&scripted),
         // No character for it, so keep the notation the author used rather than
@@ -187,6 +217,23 @@ fn script(src: &[char], start: usize, out: &mut String, map: fn(char) -> Option<
         }
     }
     next
+}
+
+/// Where the command starting at `start` ends, arguments included.
+fn command_extent(src: &[char], start: usize) -> usize {
+    let mut end = start + 1;
+    if src.get(end).is_some_and(char::is_ascii_alphabetic) {
+        while src.get(end).is_some_and(char::is_ascii_alphabetic) {
+            end += 1;
+        }
+    } else if end < src.len() {
+        // A command that is one character of punctuation, like `\,`.
+        end += 1;
+    }
+    while let Some((_, next)) = bracketed(src, end).or_else(|| group(src, end)) {
+        end = next;
+    }
+    end
 }
 
 /// The contents of a `{...}` at `at`, and the index after its closing brace.
@@ -504,6 +551,22 @@ mod tests {
     }
 
     #[test]
+    fn a_script_can_be_a_command() {
+        // The whole command belongs to the script. Taking only the backslash
+        // left the name as text and dropped the braces from what came after,
+        // turning a half into `\frac12`.
+        assert_eq!(to_unicode(r"x^\alpha"), "x^α");
+        assert_eq!(to_unicode(r"y^\frac{1}{2}"), "y^½");
+        assert_eq!(to_unicode(r"z_\beta"), "z_β");
+        assert_eq!(to_unicode(r"e^{\alpha x}"), "e^{α x}");
+        // Two characters, so the braces stay: x^√2 would read as x to the
+        // power of a root sign.
+        assert_eq!(to_unicode(r"x^\sqrt{2}"), "x^{√2}");
+        // The text after the script is still text.
+        assert_eq!(to_unicode(r"x^\alpha + 1"), "x^α + 1");
+    }
+
+    #[test]
     fn a_script_with_no_character_keeps_its_notation() {
         // No superscript 'q', and 'x^q' is clearer than 'xq'.
         assert_eq!(to_unicode("x^q"), "x^q");
@@ -544,6 +607,16 @@ mod tests {
             r"\begin{pmatrix} a \end{pmatrix}"
         );
         assert_eq!(to_unicode(r"\unheardof{x}"), r"\unheardof{x}");
+    }
+
+    #[test]
+    fn nesting_has_a_floor() {
+        // Groups recurse, and a formula is a string rather than part of the
+        // document tree, so it needs a floor of its own.
+        let deep = format!("{}a{}", "{".repeat(50_000), "}".repeat(50_000));
+        let out = to_unicode(&deep);
+        assert!(out.contains('a'), "the contents are still there");
+        assert!(out.contains('{'), "past the floor it is copied as written");
     }
 
     #[test]

@@ -212,7 +212,7 @@ fn index_of(dir: &Path) -> Result<String> {
             continue;
         }
         if path.is_dir() {
-            if holds_markdown(&path) {
+            if holds_markdown(&path, HOLDS_MARKDOWN_DEPTH) {
                 subdirectories.push(path);
             }
         } else if is_markdown(&path) {
@@ -234,18 +234,19 @@ fn index_of(dir: &Path) -> Result<String> {
 
     for path in &files {
         let name = file_name(path);
+        let (text, target) = (label(&name), link(&name));
         match first_heading(path) {
             Some(title) if title != name => {
-                out.push_str(&format!("- [{name}]({}) — {title}\n", link(&name)))
+                out.push_str(&format!("- [{text}]({target}) — {title}\n"))
             }
-            _ => out.push_str(&format!("- [{name}]({})\n", link(&name))),
+            _ => out.push_str(&format!("- [{text}]({target})\n")),
         }
     }
     if !subdirectories.is_empty() {
         out.push('\n');
         for path in &subdirectories {
             let name = file_name(path);
-            out.push_str(&format!("- [{name}/]({})\n", link(&name)));
+            out.push_str(&format!("- [{}/]({})\n", label(&name), link(&name)));
         }
     }
     Ok(out)
@@ -277,8 +278,22 @@ fn link(name: &str) -> String {
             ' ' => out.push_str("%20"),
             '(' => out.push_str("%28"),
             ')' => out.push_str("%29"),
+            '[' => out.push_str("%5B"),
+            ']' => out.push_str("%5D"),
             _ => out.push(c),
         }
+    }
+    out
+}
+
+/// The same name as link text, where a bracket would end it early.
+fn label(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for c in name.chars() {
+        if matches!(c, '[' | ']') {
+            out.push('\\');
+        }
+        out.push(c);
     }
     out
 }
@@ -291,15 +306,28 @@ pub fn is_markdown(path: &Path) -> bool {
         .is_some_and(|e| matches!(e.as_str(), "md" | "markdown" | "mdown" | "mkd" | "mdx"))
 }
 
+/// How far down to look for Markdown before deciding a directory has none.
+/// Deep enough for a docs tree, shallow enough to be quick about it.
+const HOLDS_MARKDOWN_DEPTH: usize = 8;
+
 /// Whether a directory is worth listing: one with no Markdown in it is a
 /// directory of something else, and an index full of `images/` helps nobody.
-fn holds_markdown(dir: &Path) -> bool {
+///
+/// Descends into real subdirectories only. A symlink can point back the way we
+/// came, and a cycle of them has no bottom -- this used to be saved from
+/// running for ever only by paths growing too long to open.
+fn holds_markdown(dir: &Path, depth: usize) -> bool {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return false;
     };
-    entries
-        .flatten()
-        .any(|e| is_markdown(&e.path()) || e.path().is_dir() && holds_markdown(&e.path()))
+    entries.flatten().any(|entry| {
+        if is_markdown(&entry.path()) {
+            return true;
+        }
+        depth > 0
+            && entry.file_type().is_ok_and(|kind| kind.is_dir())
+            && holds_markdown(&entry.path(), depth - 1)
+    })
 }
 
 /// The first heading in a file, to say what it is beyond its name.
@@ -319,8 +347,18 @@ fn first_heading(path: &Path) -> Option<String> {
             }
         }
     }
+    let mut fenced = false;
     for line in lines {
         let trimmed = line.trim();
+        // A shell comment at the top of a code block is not a heading, and a
+        // file that opens with one is common enough to be worth the check.
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            continue;
+        }
         if let Some(title) = trimmed.strip_prefix("# ") {
             return Some(title.trim().trim_end_matches('#').trim().to_string());
         }
@@ -592,6 +630,62 @@ mod tests {
             index.contains("[a file (1).md](a%20file%20%281%29.md)"),
             "{index}"
         );
+    }
+
+    #[test]
+    fn a_hash_inside_a_code_fence_is_not_the_heading() {
+        // A file that opens with a shell block took the comment as its title.
+        let dir = scratch("fenced");
+        let path = dir.join("install.md");
+        std::fs::write(
+            &path,
+            "```sh\n# not a heading, a comment\necho hi\n```\n\n# The Real Heading\n",
+        )
+        .unwrap();
+        assert_eq!(first_heading(&path).as_deref(), Some("The Real Heading"));
+
+        let tilde = dir.join("tilde.md");
+        std::fs::write(&tilde, "~~~\n# nor this\n~~~\n\n# Actual\n").unwrap();
+        assert_eq!(first_heading(&tilde).as_deref(), Some("Actual"));
+    }
+
+    #[test]
+    fn a_cycle_of_symlinked_directories_ends() {
+        // Only path lengths stopped this before, and only eventually.
+        let dir = scratch("cycle");
+        let inner = dir.join("a");
+        std::fs::create_dir_all(&inner).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("..", inner.join("up")).unwrap();
+
+        assert!(!holds_markdown(&inner, HOLDS_MARKDOWN_DEPTH));
+        // And a directory that really does hold Markdown is still found.
+        std::fs::write(inner.join("real.md"), "# Real\n").unwrap();
+        assert!(holds_markdown(&inner, HOLDS_MARKDOWN_DEPTH));
+    }
+
+    #[test]
+    fn markdown_deeper_down_still_counts() {
+        let dir = scratch("deep");
+        let deep = dir.join("a/b/c");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("buried.md"), "# Buried\n").unwrap();
+        assert!(holds_markdown(&dir.join("a"), HOLDS_MARKDOWN_DEPTH));
+    }
+
+    #[test]
+    fn brackets_in_a_name_do_not_break_the_link() {
+        let dir = scratch("brackets");
+        std::fs::write(dir.join("a [draft].md"), "# Draft\n").unwrap();
+        let index = index_of(&dir).unwrap();
+        assert!(
+            index.contains(r"- [a \[draft\].md](a%20%5Bdraft%5D.md)"),
+            "{index}"
+        );
+        // And the link survives being parsed back out of the index.
+        let doc = markdown::parse(&index, ParseOptions::default());
+        let text = doc.headings();
+        assert!(!text.is_empty());
     }
 
     #[test]

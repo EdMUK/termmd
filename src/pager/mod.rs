@@ -955,8 +955,14 @@ fn openable(target: &str) -> Option<Origin> {
     if let Some(url) = source::as_url(Path::new(target)) {
         // A URL with no extension could be anything, and fetching it to find
         // out would take the click away from the browser that should have it.
-        return source::is_markdown(Path::new(url.split(['?', '#']).next()?))
-            .then_some(Origin::Url(url));
+        let path = url.split(['?', '#']).next()?;
+        // A host can end in `.md` -- Moldova's -- and a bare domain is not a
+        // document, so the extension only counts below a path separator.
+        let has_path = path.split_once("://").is_some_and(|(_, rest)| {
+            rest.split_once('/')
+                .is_some_and(|(_, tail)| !tail.is_empty())
+        });
+        return (has_path && source::is_markdown(Path::new(path))).then_some(Origin::Url(url));
     }
     if target.split_once("://").is_some() {
         return None;
@@ -1518,6 +1524,11 @@ mod tests {
             ))
         );
         assert_eq!(openable("https://example.com/"), None, "not markdown");
+        assert_eq!(
+            openable("https://example.md"),
+            None,
+            "a host that ends in .md is a host, not a document"
+        );
         assert_eq!(openable("https://example.com/page.html"), None);
         assert_eq!(openable("ftp://example.com/a.md"), None, "not fetchable");
     }
