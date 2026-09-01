@@ -160,6 +160,23 @@
       so where the image would have been, rather than leaving a gap.</p>
     </div>
     <div class="card">
+      <h3><span class="dot" style="background:var(--green)"></span>Files, directories, URLs</h3>
+      <p>
+        <code>termmd docs/</code> lists a directory's Markdown, each file with its first
+        heading, as a document you can follow links out of — <kbd>backspace</kbd> comes back.
+        <code>termmd https://…/README.md</code> fetches and renders, resolving the relative
+        links and images inside it against where it came from.
+      </p>
+    </div>
+    <div>
+      <h3><span class="dot" style="background:var(--orange)"></span>Emoji and maths</h3>
+      <p>
+        <code>:rocket:</code> is drawn as a rocket, from the alias set GitHub accepts, and
+        <code>$E = mc^2$</code> as <code>E&nbsp;=&nbsp;mc²</code>. What Unicode has no
+        character for is left exactly as written, because TeX is still readable.
+      </p>
+    </div>
+    <div>
       <h3><span class="dot" style="background:var(--magenta)"></span>Tables that fit</h3>
       <p>Column widths are measured, not guessed. Spare room goes where it is needed; when
       space runs short the prose column wraps while <code>1.2.0</code> and <code>Yes</code>
@@ -200,6 +217,12 @@
     <kbd>i</kbd> to toggle images. The mouse belongs to your terminal, so drag still selects
     and copies — the wheel scrolls through alternate scroll.
   </p>
+  <p class="lede">
+    <kbd>y</kbd> copies the code block you are looking at to your clipboard, over OSC 52,
+    which works down an ssh connection. It copies the source as written — no highlighting,
+    no line numbers, and no trailing newline, so a shell snippet lands at your prompt
+    instead of running itself.
+  </p>
   <figure style="margin-top:0">
     <img src="images/screenshot-pager.png" alt="The termmd pager with the table of contents panel open over a document, showing headings indented by level with the current section highlighted.">
   </figure>
@@ -218,10 +241,17 @@
         <tr><td>foot, mlterm, xterm</td><td>sixel</td><td>truecolor</td><td>varies</td></tr>
         <tr><td>Windows Terminal, Konsole</td><td>sixel</td><td>truecolor</td><td>yes</td></tr>
         <tr><td>Alacritty, Terminal.app, others</td><td>half blocks</td><td>256 or 16</td><td>varies</td></tr>
-        <tr><td>tmux, screen</td><td>half blocks</td><td>inherited</td><td>inherited</td></tr>
+        <tr><td>tmux 3.4+, sixel terminal</td><td>sixel, drawn by tmux</td><td>inherited</td><td>inherited</td></tr>
+        <tr><td>tmux otherwise, screen</td><td>half blocks</td><td>inherited</td><td>inherited</td></tr>
       </tbody>
     </table>
   </div>
+  <p class="lede" style="margin-top:20px">
+    Inside tmux the terminal that answers is tmux, and it claims sixel whether or not the
+    terminal it draws on could show one. So termmd asks tmux what it decided the
+    <em>client</em> can do — <code>#{client_termfeatures}</code> — and takes pictures and
+    hyperlinks from that. A client that cannot manage them keeps half blocks.
+  </p>
   <p class="lede" style="margin-top:20px">
     Sixel is encoded by termmd itself, quantisation included: median cut over a 15-bit
     histogram, Floyd–Steinberg dithering, run-length encoded output. No <code>libsixel</code>.
