@@ -11,7 +11,7 @@ use super::{
 use crate::markdown::{
     AlertKind, Block, Document, ImageRef, Inline, Inlines, List, ir_plain_text as plain_text,
 };
-use crate::term::caps::{Capabilities, GraphicsProtocol};
+use crate::term::caps::{Capabilities, GraphicsProtocol, UnicodeLevel};
 use crate::term::style::{Color, Style};
 use crate::theme::Theme;
 
@@ -685,7 +685,17 @@ fn push_inline(
     out: &mut Vec<Token>,
 ) {
     match inline {
-        Inline::Text(t) => tokenize_text(t, style, link, out),
+        Inline::Text(t) => {
+            // `:rocket:` is worth drawing as a rocket, but only where the
+            // terminal has agreed to Unicode: under --ascii the shortcode is
+            // the more readable of the two.
+            let text = if ctx.caps.unicode == UnicodeLevel::Full {
+                super::emoji::expand(t)
+            } else {
+                std::borrow::Cow::Borrowed(t.as_str())
+            };
+            tokenize_text(&text, style, link, out)
+        }
         Inline::Code(t) => {
             let s = style.merge(ctx.theme.inline_code);
             // Inline code keeps its interior spaces, so it is one token.
@@ -833,6 +843,53 @@ mod tests {
 
     fn text(src: &str) -> String {
         text_at(src, 40)
+    }
+
+    /// The same, on a terminal that admits to Unicode.
+    fn text_unicode(src: &str) -> String {
+        let doc = parse(src, ParseOptions::default());
+        let opts = RenderOptions {
+            width: 40,
+            margin: 0,
+            images: false,
+            glyphs: crate::render::glyphs::UNICODE,
+            ..Default::default()
+        };
+        let caps = Capabilities {
+            unicode: UnicodeLevel::Full,
+            ..Default::default()
+        };
+        let hl = Highlighter::plain();
+        super::render_document(&doc, &opts, &Theme::mono(), &caps, &mut NoImages, &hl).plain_text()
+    }
+
+    #[test]
+    fn emoji_shortcodes_expand_in_prose_only() {
+        let src = "Ship it :rocket:
+
+`:rocket:` stays
+
+```
+:rocket:
+```
+";
+        let out = text_unicode(src);
+        assert!(out.contains("Ship it 🚀"), "{out}");
+        assert_eq!(
+            out.matches(":rocket:").count(),
+            2,
+            "code spans and code blocks keep the shortcode: {out}"
+        );
+    }
+
+    #[test]
+    fn emoji_shortcodes_survive_an_ascii_terminal() {
+        // Nothing to draw them with, so the name is the better rendering.
+        let out = text(
+            "Ship it :rocket:
+",
+        );
+        assert!(out.contains(":rocket:"), "{out}");
     }
 
     #[test]

@@ -48,6 +48,10 @@ the columns that need it; when space runs short the widest column wraps while
 `1.2.0` and `Yes` stay intact. Below the width where a grid stops being readable,
 the table becomes a list of records rather than a mangled box.
 
+**Emoji shortcodes.** `:rocket:` is drawn as a rocket, using the same alias set
+GitHub accepts. Code spans and code blocks keep the name, and so does `--ascii`,
+where there is nothing to draw it with.
+
 **Typography.** Text is measured in display columns over grapheme clusters, so
 CJK, emoji, and combining accents wrap where they should. Lists hang their
 continuation lines under the text. Quotes carry a bar down the whole block.

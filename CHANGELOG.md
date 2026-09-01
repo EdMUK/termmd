@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `:shortcode:` emoji, from the alias set GitHub accepts. Expanded at render
+  time rather than at parse time, so a code span, a code block and `--ascii` all
+  keep the name they were written with.
 - Images and hyperlinks inside tmux, when the terminal tmux is drawing on can
   manage them. tmux answers a capability query on its own behalf -- it claims
   sixel whether or not its client could show one -- so termmd asks tmux what it

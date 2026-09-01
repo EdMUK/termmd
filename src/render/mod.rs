@@ -8,6 +8,7 @@
 
 mod blocks;
 mod code;
+mod emoji;
 pub mod glyphs;
 pub mod inline;
 mod table;
