@@ -21,6 +21,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # tests/terminal.rs runs termmd inside tmux. It skips without one, and a
+      # skip on every platform would leave those tests as decoration.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get install -y --no-install-recommends tmux
+      - if: runner.os == 'macOS'
+        run: brew install -q tmux
       - run: cargo test --all-targets
       # Doc tests are not covered by --all-targets.
       - run: cargo test --doc

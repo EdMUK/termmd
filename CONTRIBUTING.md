@@ -26,6 +26,12 @@ feeding recorded escape sequences to a parser. If a change can only be verified
 by looking at a terminal, that usually means the logic wants pulling out from the
 I/O around it.
 
+The exception is `tests/terminal.rs`, for the few features whose entire point is
+what reaches the terminal: the clipboard over OSC 52, and what tmux lets through.
+Those run termmd on a pty or in a real tmux pane and inspect the bytes that come
+out. They skip, saying so, on a machine without tmux. Add to that file only when
+nothing short of a terminal can check the change.
+
 **Say why, not what.** The code says what it does. Comments are for the reason:
 why a table shrinks its widest column first, why the cursor is positioned by hand
 around an image, why the Primary DA query goes last. If a comment restates the
