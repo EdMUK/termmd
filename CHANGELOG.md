@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `--front-matter` prints a document's YAML front matter. It was already parsed
+  and kept out of the page, where it is metadata rather than content, but there
+  was no way to ask for it.
 - Maths is rendered into Unicode where Unicode has the characters: scripts
   (`x^2` becomes `x²`), Greek, the comparison and set operators, roots,
   fractions, and blackboard letters. Anything else -- an unknown command, a

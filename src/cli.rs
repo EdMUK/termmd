@@ -95,6 +95,10 @@ pub struct Cli {
     #[arg(long)]
     pub toc: bool,
 
+    /// Print the document's YAML front matter and exit.
+    #[arg(long)]
+    pub front_matter: bool,
+
     /// Print what termmd detected about this terminal and exit.
     #[arg(long)]
     pub caps: bool,

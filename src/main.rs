@@ -53,6 +53,9 @@ fn run() -> Result<()> {
     if cli.toc {
         return print_toc(&termmd::source::build_document(&sources, settings.parse));
     }
+    if cli.front_matter {
+        return print_front_matter(&termmd::source::build_document(&sources, settings.parse));
+    }
 
     let remote = if settings.remote_images {
         RemotePolicy::Allow
@@ -213,6 +216,21 @@ fn print_toc(document: &Document) -> Result<()> {
         let indent = "  ".repeat(level.saturating_sub(1) as usize);
         writeln!(out, "{indent}{text}  #{id}")?;
     }
+    Ok(out.flush()?)
+}
+
+/// Prints the front matter, which the renderer deliberately does not show.
+///
+/// It is metadata for whatever publishes the document, not part of it, so the
+/// page has no place for it -- but a script that wants a document's title or
+/// tags should not have to parse the file a second time to get them.
+fn print_front_matter(document: &Document) -> Result<()> {
+    let Some(text) = document.front_matter.as_deref() else {
+        return Ok(());
+    };
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    writeln!(out, "{}", text.trim_end())?;
     Ok(out.flush()?)
 }
 

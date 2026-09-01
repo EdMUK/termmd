@@ -431,3 +431,26 @@ fn writes_a_man_page() {
         "the man page is missing a flag termmd accepts"
     );
 }
+
+#[test]
+fn prints_front_matter_when_asked() {
+    let (out, _, ok) = run(&["--front-matter", &fixture("front-matter.md")]);
+    assert!(ok);
+    assert!(out.contains("title: Fixture with front matter"), "{out}");
+    assert!(out.contains("tags: [one, two]"), "{out}");
+    assert!(
+        !out.contains("Body text"),
+        "the document itself is not it: {out}"
+    );
+
+    // It stays out of the rendered page, where it is not content.
+    let (page, _, ok) = run(&["-P", &fixture("front-matter.md")]);
+    assert!(ok);
+    assert!(page.contains("Body text"));
+    assert!(!page.contains("tags:"), "{page}");
+
+    // A document without any is not an error, it is an empty answer.
+    let (out, err, ok) = run(&["--front-matter", &fixture("sample.md")]);
+    assert!(ok, "{err}");
+    assert!(out.trim().is_empty(), "{out}");
+}
