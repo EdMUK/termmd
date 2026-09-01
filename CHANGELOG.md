@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Images and hyperlinks inside tmux, when the terminal tmux is drawing on can
+  manage them. tmux answers a capability query on its own behalf -- it claims
+  sixel whether or not its client could show one -- so termmd asks tmux what it
+  decided the client supports instead. From tmux 3.4 a sixel is drawn by tmux
+  itself, with no passthrough involved. Anything older, GNU screen, or a client
+  without the feature keeps half blocks, which was the only option before.
+
 ## [0.1.2] - 2026-08-28
 
 Nothing changes about how a document is drawn. This one is about getting termmd

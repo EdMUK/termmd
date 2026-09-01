@@ -251,12 +251,19 @@ files, which no terminal can do. `shift`-drag still selects while that is on, an
 | foot, mlterm, xterm (`-ti vt340`) | sixel | truecolor | varies |
 | Windows Terminal, Konsole | sixel | truecolor | yes |
 | Alacritty, Terminal.app, anything else | half blocks | 256 or 16 | varies |
-| tmux, screen | half blocks | inherited | inherited |
+| tmux 3.4+, on a sixel terminal | sixel, drawn by tmux | inherited | inherited |
+| tmux otherwise, screen | half blocks | inherited | inherited |
 
 Detection is by live query where possible: `termmd` asks the terminal what it
-supports and only falls back to guessing from `TERM` when nothing answers. Inside
-a multiplexer it uses half blocks, because passthrough of graphics sequences is
-not something to rely on.
+supports and only falls back to guessing from `TERM` when nothing answers.
+
+Inside tmux the terminal that answers is tmux, and its answers are about itself:
+it claims sixel whether or not the terminal it is drawing on could show one. So
+termmd asks tmux instead — `tmux display-message -p '#{client_termfeatures}'`
+reports what tmux decided the *client* can do. A client that does sixel gets
+pictures, drawn by tmux from 3.4 onwards without any passthrough involved, and
+one that does not keeps half blocks. Hyperlinks work the same way. Under GNU
+screen, or an older tmux that names neither feature, it stays on half blocks.
 
 Sixel is encoded by termmd itself, including the colour quantisation: median cut
 over a 15-bit histogram, Floyd–Steinberg dithering, and run-length encoded

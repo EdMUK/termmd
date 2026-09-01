@@ -3,6 +3,7 @@
 pub mod caps;
 pub mod probe;
 pub mod style;
+pub mod tmux;
 
 pub use caps::{Capabilities, ColorDepth, GraphicsProtocol, UnicodeLevel};
 pub use style::{Color, Rgb, Style, StyleWriter};

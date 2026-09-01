@@ -12,6 +12,7 @@
 
 use super::caps::{Capabilities, GraphicsProtocol};
 use super::style::Rgb;
+use super::tmux;
 
 /// Total time we are willing to wait for replies.
 #[cfg(unix)]
@@ -26,6 +27,21 @@ pub struct ProbeResult {
     pub cell_px: Option<(u16, u16)>,
     pub background: Option<Rgb>,
     pub answered: bool,
+}
+
+/// Promotes a multiplexed session to what tmux says its client can manage.
+///
+/// tmux from 3.4 parses a sixel into the pane and redraws it itself, so this is
+/// not passthrough and does not depend on the escape codes surviving; and it
+/// forwards OSC 8 to a client that understands it. Neither is promoted without
+/// tmux naming the feature, which keeps every older version on half blocks.
+fn apply_tmux(caps: &mut Capabilities, features: tmux::Features) {
+    if features.sixel && caps.graphics == GraphicsProtocol::Blocks {
+        caps.graphics = GraphicsProtocol::Sixel;
+    }
+    if features.hyperlinks {
+        caps.hyperlinks = true;
+    }
 }
 
 /// The query batch, ordered so that the Primary DA reply acts as a sentinel.
@@ -48,6 +64,14 @@ fn queries() -> String {
 
 /// Runs a probe and folds the result into `caps`.
 pub fn refine(caps: &mut Capabilities) {
+    // Inside tmux the terminal we can reach is tmux itself, and its answers are
+    // about tmux. What the client on the far side can draw has to be asked of
+    // tmux separately.
+    if caps.multiplexed {
+        if let Some(features) = tmux::features() {
+            apply_tmux(caps, features);
+        }
+    }
     let Some(result) = run() else { return };
     if !result.answered {
         return;
@@ -308,6 +332,47 @@ mod tests {
         let r = parse(b"");
         assert!(!r.answered);
         assert_eq!(r, ProbeResult::default());
+    }
+
+    #[test]
+    fn tmux_promotes_only_what_its_client_can_draw() {
+        let multiplexed = || Capabilities {
+            graphics: GraphicsProtocol::Blocks,
+            multiplexed: true,
+            is_tty: true,
+            ..Default::default()
+        };
+
+        let mut caps = multiplexed();
+        apply_tmux(&mut caps, tmux::parse("bpaste,RGB,sixel,hyperlinks,title"));
+        assert_eq!(caps.graphics, GraphicsProtocol::Sixel);
+        assert!(caps.hyperlinks);
+
+        // The same tmux in front of a terminal that can do neither.
+        let mut caps = multiplexed();
+        apply_tmux(&mut caps, tmux::parse("bpaste,RGB,title"));
+        assert_eq!(
+            caps.graphics,
+            GraphicsProtocol::Blocks,
+            "half blocks are the only thing that survives everywhere"
+        );
+        assert!(!caps.hyperlinks);
+    }
+
+    #[test]
+    fn tmux_does_not_overrule_a_forced_protocol() {
+        // `--images none` and `--images kitty` are resolved into the same field
+        // the promotion writes, so it must only ever lift the fallback.
+        for forced in [GraphicsProtocol::None, GraphicsProtocol::Kitty] {
+            let mut caps = Capabilities {
+                graphics: forced,
+                multiplexed: true,
+                is_tty: true,
+                ..Default::default()
+            };
+            apply_tmux(&mut caps, tmux::parse("sixel"));
+            assert_eq!(caps.graphics, forced);
+        }
     }
 
     #[test]
