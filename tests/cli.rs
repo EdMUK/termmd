@@ -454,3 +454,39 @@ fn prints_front_matter_when_asked() {
     assert!(ok, "{err}");
     assert!(out.trim().is_empty(), "{out}");
 }
+
+#[test]
+fn a_directory_is_rendered_as_an_index_of_its_markdown() {
+    let dir = std::env::temp_dir().join("termmd-cli-directory");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("guides")).unwrap();
+    std::fs::write(dir.join("README.md"), "# The Readme\n\nBody.\n").unwrap();
+    std::fs::write(dir.join("notes.md"), "# Some Notes\n").unwrap();
+    std::fs::write(dir.join("photo.png"), "not markdown").unwrap();
+    std::fs::write(dir.join("guides/one.md"), "# One\n").unwrap();
+
+    let (out, err, ok) = run(&["-P", "--width", "70", dir.to_str().unwrap()]);
+    assert!(ok, "{err}");
+    assert!(out.contains("README.md"), "{out}");
+    assert!(
+        out.contains("The Readme"),
+        "the heading says what it is: {out}"
+    );
+    assert!(out.contains("Some Notes"), "{out}");
+    assert!(
+        out.contains("guides/"),
+        "a directory with Markdown in it: {out}"
+    );
+    assert!(!out.contains("photo.png"), "not Markdown: {out}");
+    // The index is a document about the directory, not the documents in it.
+    assert!(!out.contains("Body."), "{out}");
+}
+
+#[test]
+fn a_url_that_is_not_a_url_is_still_a_path() {
+    // The error has to name what was actually looked for, or a typo in a URL
+    // reads as a mysteriously missing file.
+    let (_, err, ok) = run(&["/no/such/directory/at/all"]);
+    assert!(!ok);
+    assert!(err.contains("/no/such/directory/at/all"), "{err}");
+}

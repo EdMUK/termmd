@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- A URL can be given instead of a file: `termmd https://example.com/README.md`
+  fetches and renders it, resolving the relative links and images inside it
+  against where it came from. Naming a URL is asking for it, so there is no flag
+  to turn on; the images inside it still wait for `--remote-images`. In the
+  pager, a link to a remote Markdown document opens in termmd rather than in a
+  browser, on the same reasoning.
+- A directory can be given too. `termmd docs/` lists the Markdown in it, with
+  each file's first heading beside its name, as a document whose links the pager
+  already knows how to follow -- so a directory tree is browsable, with
+  `backspace` to come back, out of parts that were already there.
 - `--front-matter` prints a document's YAML front matter. It was already parsed
   and kept out of the page, where it is metadata rather than content, but there
   was no way to ask for it.

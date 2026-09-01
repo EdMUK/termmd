@@ -247,14 +247,23 @@ mod tests {
 /// Done once after parsing, which means later stages never need to know which
 /// file a node came from -- and a document assembled from several files keeps
 /// each part's own idea of where `./diagram.png` lives.
-pub fn rebase_urls(doc: &mut Document, base: &std::path::Path) {
+/// What a document's relative URLs resolve against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UrlBase<'a> {
+    /// A document read from the file system.
+    Dir(&'a std::path::Path),
+    /// A document fetched over HTTP, whose own URL is the base.
+    Url(&'a str),
+}
+
+pub fn rebase_urls(doc: &mut Document, base: UrlBase<'_>) {
     rebase_blocks(&mut doc.blocks, base);
     for (_, blocks) in &mut doc.footnotes {
         rebase_blocks(blocks, base);
     }
 }
 
-fn rebase_blocks(blocks: &mut [Block], base: &std::path::Path) {
+fn rebase_blocks(blocks: &mut [Block], base: UrlBase<'_>) {
     for block in blocks {
         match block {
             Block::Heading { content, .. } | Block::Paragraph(content) => {
@@ -290,7 +299,7 @@ fn rebase_blocks(blocks: &mut [Block], base: &std::path::Path) {
     }
 }
 
-fn rebase_inlines(inlines: &mut [Inline], base: &std::path::Path) {
+fn rebase_inlines(inlines: &mut [Inline], base: UrlBase<'_>) {
     for inline in inlines {
         match inline {
             Inline::Image(img) => rebase_url(&mut img.url, base),
@@ -311,11 +320,10 @@ fn rebase_inlines(inlines: &mut [Inline], base: &std::path::Path) {
 /// stages resolve paths too, and a relative result can be joined a second time
 /// against a different base, quietly turning `doc/x.png` into `doc/doc/x.png`.
 /// An absolute path cannot be re-based by accident.
-fn rebase_url(url: &mut String, base: &std::path::Path) {
-    // Absolute URLs, fragments, and anything with a scheme stay as they are.
+fn rebase_url(url: &mut String, base: UrlBase<'_>) {
+    // Fragments and anything carrying a scheme of its own stay as they are.
     if url.is_empty()
         || url.starts_with('#')
-        || url.starts_with('/')
         || url.starts_with("data:")
         || url.split_once("://").is_some()
         || url.split_once(':').is_some_and(|(scheme, _)| {
@@ -327,11 +335,73 @@ fn rebase_url(url: &mut String, base: &std::path::Path) {
     {
         return;
     }
-    let joined = base.join(&*url);
-    let absolute = std::path::absolute(&joined).unwrap_or(joined);
-    if let Some(s) = absolute.to_str() {
-        *url = s.to_string();
+    match base {
+        UrlBase::Dir(dir) => {
+            // A leading slash is already an absolute path on this filesystem.
+            // Against a URL it means something else entirely -- the root of the
+            // host -- which is why this test belongs here and not above.
+            if url.starts_with('/') {
+                return;
+            }
+            let joined = dir.join(&*url);
+            let absolute = std::path::absolute(&joined).unwrap_or(joined);
+            if let Some(s) = absolute.to_str() {
+                *url = s.to_string();
+            }
+        }
+        UrlBase::Url(document) => {
+            if let Some(joined) = join_url(document, url) {
+                *url = joined;
+            }
+        }
     }
+}
+
+/// Resolves a relative reference against the URL of the document holding it.
+///
+/// Enough of RFC 3986 to be right about what a README contains: an absolute
+/// path, a path relative to the document, and the `..` segments people write
+/// when a repository's images live one directory up.
+fn join_url(document: &str, relative: &str) -> Option<String> {
+    let (scheme, rest) = document.split_once("://")?;
+    // The base's own query and fragment are not part of the path.
+    let rest = rest.split(['?', '#']).next().unwrap_or(rest);
+    let (authority, path) = match rest.split_once('/') {
+        Some((authority, path)) => (authority, path),
+        None => (rest, ""),
+    };
+
+    let joined = if let Some(absolute) = relative.strip_prefix('/') {
+        absolute.to_string()
+    } else {
+        // Relative to the directory the document is in, not to the document.
+        let dir = match path.rsplit_once('/') {
+            Some((dir, _)) => dir,
+            None => "",
+        };
+        if dir.is_empty() {
+            relative.to_string()
+        } else {
+            format!("{dir}/{relative}")
+        }
+    };
+
+    let mut segments: Vec<&str> = Vec::new();
+    for segment in joined.split('/') {
+        match segment {
+            "." | "" => {}
+            ".." => {
+                segments.pop();
+            }
+            other => segments.push(other),
+        }
+    }
+    // A trailing slash means a directory, and dropping it changes the meaning.
+    let trailing = if joined.ends_with('/') { "/" } else { "" };
+    Some(format!(
+        "{scheme}://{authority}/{}{trailing}",
+        segments.join("/")
+    ))
 }
 
 #[cfg(test)]
@@ -350,6 +420,10 @@ mod rebase_tests {
     }
 
     fn rebase_from(base: &Path, url: &str) -> String {
+        rebase_against(UrlBase::Dir(base), url)
+    }
+
+    fn rebase_against(base: UrlBase<'_>, url: &str) -> String {
         let mut doc = Document {
             blocks: vec![Block::Figure {
                 image: ImageRef {
@@ -416,7 +490,7 @@ mod rebase_tests {
             }],
             ..Default::default()
         };
-        rebase_urls(&mut doc, &base());
+        rebase_urls(&mut doc, UrlBase::Dir(&base()));
         let Block::BlockQuote { blocks, .. } = &doc.blocks[0] else {
             panic!()
         };

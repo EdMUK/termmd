@@ -182,12 +182,22 @@ termmd --man > /usr/local/share/man/man1/termmd.1
 termmd README.md              # interactive pager
 termmd -P README.md           # print and exit
 termmd *.md                   # several files, labelled and concatenated
+termmd docs/                  # an index of a directory's Markdown, browsable
+termmd https://example.com/README.md      # fetch and render
 curl -s example.com/doc.md | termmd
 termmd --remote-images R.md   # fetch http(s) images — off by default
 termmd --watch NOTES.md       # re-render on save
 termmd --toc README.md        # just the table of contents
 termmd --caps                 # what termmd detected about your terminal
 ```
+
+**A directory** becomes an index of the Markdown in it, with each file's first
+heading beside its name, and links you can follow into. Since the pager already
+opens a local document and `backspace` already comes back, `termmd docs/` is a
+browsable tree. **A URL** is fetched and rendered; the relative links and images
+inside it resolve against where it came from, so a repository README works.
+Naming a URL is asking for it, so it needs no flag — but the images inside it
+are still off unless you pass `--remote-images`.
 
 If a picture is missing, it is almost always a remote one: most README badges
 live at an `http(s)` URL, and termmd does not fetch those unless asked. The

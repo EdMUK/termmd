@@ -6,9 +6,9 @@ mod parse;
 mod slug;
 
 pub use ir::plain_text as ir_plain_text;
-pub use ir::rebase_urls;
 pub use ir::{
     AlertKind, Alignment, Block, Cell, Document, ImageRef, Inline, Inlines, List, ListItem, Table,
 };
+pub use ir::{UrlBase, rebase_urls};
 pub use parse::{ParseOptions, parse};
 pub use slug::Slugger;

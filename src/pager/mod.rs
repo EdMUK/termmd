@@ -15,7 +15,7 @@ mod overlay;
 pub mod search;
 
 use std::io::{IsTerminal, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -32,7 +32,7 @@ use crate::cli::Settings;
 use crate::images::{Store, kitty};
 use crate::markdown::Document;
 use crate::render::{Highlighter, ImageProvider, ImageRequest, Line, Screen, Span, WriteOptions};
-use crate::source::{Source, build_document};
+use crate::source::{self, Origin, Source, build_document};
 use crate::term::caps::GraphicsProtocol;
 use crate::term::style::StyleWriter;
 use search::Search;
@@ -442,8 +442,8 @@ impl Pager<'_> {
             Some((path, fragment)) => (path, Some(fragment)),
             None => (url, None),
         };
-        if let Some(path) = local_markdown(target) {
-            return self.open_document(path, fragment);
+        if let Some(origin) = openable(target) {
+            return self.open_document(origin, fragment);
         }
 
         // Opening a link leaves the terminal, so say what happened either way.
@@ -454,17 +454,14 @@ impl Pager<'_> {
         Ok(())
     }
 
-    /// Loads another Markdown file in place of the current one.
-    fn open_document(&mut self, path: PathBuf, fragment: Option<&str>) -> Result<()> {
-        let mut source = Source {
-            name: path.display().to_string(),
-            path: Some(path.clone()),
-            text: String::new(),
-        };
+    /// Loads another document in place of the current one.
+    fn open_document(&mut self, origin: Origin, fragment: Option<&str>) -> Result<()> {
+        let mut source = Source::pending(origin);
         if let Err(error) = source.reload() {
             self.message = Some(format!("{error:#}"));
             return Ok(());
         }
+        let name = source.name.clone();
 
         self.history.push(Visit {
             sources: std::mem::take(&mut self.sources),
@@ -476,7 +473,7 @@ impl Pager<'_> {
         self.top = fragment.and_then(|f| self.screen.anchor(f)).unwrap_or(0);
         self.left = 0;
         self.clamp();
-        self.message = Some(format!("{} (backspace to go back)", path.display()));
+        self.message = Some(format!("{name} (backspace to go back)"));
         Ok(())
     }
 
@@ -889,17 +886,31 @@ impl Pager<'_> {
 ///
 /// URLs with a scheme are somebody else's problem, and so is a local file that
 /// is not Markdown -- a PDF or an image should open in whatever handles it.
-fn local_markdown(target: &str) -> Option<PathBuf> {
-    if target.is_empty() || target.split_once("://").is_some() || target.starts_with("mailto:") {
+/// What termmd can open in place of the document on screen.
+///
+/// Markdown, wherever it is: a file, a directory to list, or a URL. A link to a
+/// remote document is fetched here rather than handed to a browser, which is
+/// the same bargain as naming a URL on the command line -- following a link is
+/// asking for what is behind it. Everything else goes to the browser, as
+/// before.
+fn openable(target: &str) -> Option<Origin> {
+    if target.is_empty() || target.starts_with("mailto:") {
+        return None;
+    }
+    if let Some(url) = source::as_url(Path::new(target)) {
+        // A URL with no extension could be anything, and fetching it to find
+        // out would take the click away from the browser that should have it.
+        return source::is_markdown(Path::new(url.split(['?', '#']).next()?))
+            .then_some(Origin::Url(url));
+    }
+    if target.split_once("://").is_some() {
         return None;
     }
     let path = PathBuf::from(target.strip_prefix("file://").unwrap_or(target));
-    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
-    let markdown = matches!(
-        extension.as_str(),
-        "md" | "markdown" | "mdown" | "mkd" | "mdx"
-    );
-    (markdown && path.is_file()).then_some(path)
+    if path.is_dir() {
+        return Some(Origin::Directory(path));
+    }
+    (source::is_markdown(&path) && path.is_file()).then_some(Origin::File(path))
 }
 
 /// Writes spans, opening and closing OSC 8 hyperlinks as the link changes.
@@ -1036,7 +1047,13 @@ impl FileWatcher {
         for path in paths {
             // Watch the containing directory: editors that write atomically
             // replace the file, which a file-level watch would stop following.
-            let target = path.parent().filter(|p| !p.as_os_str().is_empty());
+            // A directory listing watches itself, since what changes it is a
+            // file appearing inside it.
+            let target = if path.is_dir() {
+                Some(path.as_path())
+            } else {
+                path.parent().filter(|p| !p.as_os_str().is_empty())
+            };
             let _ = notify::Watcher::watch(
                 &mut watcher,
                 target.unwrap_or(std::path::Path::new(".")),
@@ -1366,20 +1383,43 @@ mod tests {
         std::fs::write(&md, "# Other\n").unwrap();
         std::fs::write(dir.join("thing.pdf"), "x").unwrap();
 
-        assert_eq!(local_markdown(md.to_str().unwrap()), Some(md.clone()));
         assert_eq!(
-            local_markdown(dir.join("thing.pdf").to_str().unwrap()),
+            openable(md.to_str().unwrap()),
+            Some(Origin::File(md.clone()))
+        );
+        assert_eq!(
+            openable(dir.join("thing.pdf").to_str().unwrap()),
             None,
             "not markdown"
         );
         assert_eq!(
-            local_markdown(dir.join("missing.md").to_str().unwrap()),
+            openable(dir.join("missing.md").to_str().unwrap()),
             None,
             "not a file"
         );
-        assert_eq!(local_markdown("https://example.com/a.md"), None, "remote");
-        assert_eq!(local_markdown("mailto:someone@example.com"), None);
-        assert_eq!(local_markdown(""), None);
+        assert_eq!(openable("mailto:someone@example.com"), None);
+        assert_eq!(openable(""), None);
+
+        // A directory is opened as an index of what is in it.
+        assert_eq!(
+            openable(dir.to_str().unwrap()),
+            Some(Origin::Directory(dir.clone()))
+        );
+
+        // Remote Markdown is fetched; anything else at a URL is the browser's.
+        assert_eq!(
+            openable("https://example.com/a.md"),
+            Some(Origin::Url("https://example.com/a.md".into()))
+        );
+        assert_eq!(
+            openable("https://example.com/docs/guide.markdown#top"),
+            Some(Origin::Url(
+                "https://example.com/docs/guide.markdown#top".into()
+            ))
+        );
+        assert_eq!(openable("https://example.com/"), None, "not markdown");
+        assert_eq!(openable("https://example.com/page.html"), None);
+        assert_eq!(openable("ftp://example.com/a.md"), None, "not fetchable");
     }
 
     #[test]
@@ -1393,20 +1433,20 @@ mod tests {
 
         let mut p = pager(100, 25);
         p.sources = vec![Source {
-            path: Some(first.clone()),
+            origin: Origin::File(first.clone()),
             name: "first.md".into(),
             text: "# First\n".into(),
         }];
         p.top = 7;
 
         p.follow(other.to_str().unwrap()).unwrap();
-        assert_eq!(p.sources[0].path.as_deref(), Some(other.as_path()));
+        assert_eq!(p.sources[0].path(), Some(other.as_path()));
         assert!(p.screen.plain_text().contains("The Other Document"));
         assert_eq!(p.top, 0, "a new document starts at the top");
         assert_eq!(p.history.len(), 1);
 
         p.go_back();
-        assert_eq!(p.sources[0].path.as_deref(), Some(first.as_path()));
+        assert_eq!(p.sources[0].path(), Some(first.as_path()));
         assert!(p.history.is_empty());
     }
 
