@@ -123,6 +123,10 @@ pub struct Line {
     /// Index into [`Screen::headings`] when this line starts a heading, which is
     /// how anchors get their final line numbers once layout is complete.
     pub anchor: Option<usize>,
+    /// Index into [`Screen::code_blocks`] when this line is part of one. Set
+    /// during layout for the same reason as `anchor`: a block's line numbers
+    /// are not known until every line above it has been placed.
+    pub code: Option<usize>,
 }
 
 impl Line {
@@ -263,6 +267,10 @@ pub struct Screen {
     pub lines: Vec<Line>,
     /// Link destinations, indexed by [`Span::link`].
     pub links: Vec<String>,
+    /// Every fenced or indented block's source, as it was written: without
+    /// highlighting, wrapping, line numbers or the background padding. What a
+    /// reader would have got by selecting it, if selecting it were easy.
+    pub code_blocks: Vec<String>,
     pub headings: Vec<HeadingEntry>,
     /// Heading id to line number, for resolving `#anchor` links.
     pub anchors: HashMap<String, usize>,

@@ -34,6 +34,7 @@ use crate::markdown::Document;
 use crate::render::{Highlighter, ImageProvider, ImageRequest, Line, Screen, Span, WriteOptions};
 use crate::source::{self, Origin, Source, build_document};
 use crate::term::caps::GraphicsProtocol;
+use crate::term::clipboard;
 use crate::term::style::StyleWriter;
 use search::Search;
 
@@ -325,6 +326,7 @@ impl Pager<'_> {
             KeyCode::Char('L') => self.open_panel(Panel::Links),
             KeyCode::Char('H') | KeyCode::F(1) => self.open_panel(Panel::Help),
 
+            KeyCode::Char('y') => self.copy_visible_code(),
             KeyCode::Char('r') => self.reload()?,
             KeyCode::Char('i') => self.toggle_images(),
             KeyCode::Char('m') => self.toggle_mouse(),
@@ -388,9 +390,62 @@ impl Pager<'_> {
             KeyCode::Char('g') | KeyCode::Home => self.selection = 0,
             KeyCode::Char('G') | KeyCode::End => self.selection = count.saturating_sub(1),
             KeyCode::Enter => self.activate_panel_selection(panel)?,
+            KeyCode::Char('y') if panel == Panel::Links => {
+                let url = self.screen.links.get(self.selection).cloned();
+                match url {
+                    Some(url) => self.put_on_clipboard(&url, &url),
+                    None => self.message = Some("no link to copy".into()),
+                }
+            }
             _ => {}
         }
         Ok(())
+    }
+
+    /// Copies the first code block on screen.
+    ///
+    /// The first visible one rather than the nearest one: a reader looking at
+    /// a block and pressing `y` means that block, and "the one I can see" is a
+    /// rule that can be followed without thinking about it.
+    fn copy_visible_code(&mut self) {
+        let Some(code) = self.visible_code().cloned() else {
+            self.message = Some("no code block on screen".into());
+            return;
+        };
+        let lines = code.lines().count();
+        let plural = if lines == 1 { "" } else { "s" };
+        self.put_on_clipboard(&code, &format!("copied {lines} line{plural}"));
+    }
+
+    /// The source of the first code block showing in the viewport.
+    fn visible_code(&self) -> Option<&String> {
+        self.screen
+            .lines
+            .iter()
+            .skip(self.top)
+            .take(self.viewport())
+            .find_map(|line| line.code)
+            .and_then(|index| self.screen.code_blocks.get(index))
+    }
+
+    /// Puts `text` on the clipboard, saying what happened either way.
+    fn put_on_clipboard(&mut self, text: &str, said: &str) {
+        self.message = Some(match clipboard::copy(text) {
+            // Written straight out rather than through the next frame: it draws
+            // nothing, so it cannot disturb what is on screen.
+            Ok(clipboard::Copy::Sequence(sequence)) => {
+                let mut stdout = std::io::stdout();
+                match stdout
+                    .write_all(sequence.as_bytes())
+                    .and_then(|()| stdout.flush())
+                {
+                    Ok(()) => said.to_string(),
+                    Err(e) => format!("could not copy: {e}"),
+                }
+            }
+            Ok(clipboard::Copy::Done) => said.to_string(),
+            Err(why) => why.to_string(),
+        });
     }
 
     fn panel_len(&self, panel: Panel) -> usize {
@@ -1149,6 +1204,51 @@ mod tests {
 
     fn press(p: &mut Pager<'_>, code: KeyCode) {
         p.on_key(KeyEvent::new(code, KeyModifiers::NONE)).unwrap();
+    }
+
+    /// A pager showing a real document, laid out as the renderer would.
+    fn pager_of(markdown: &str, rows: u16) -> Pager<'static> {
+        let mut p = pager(0, rows);
+        p.document = crate::markdown::parse(markdown, Default::default());
+        p.rebuild();
+        p
+    }
+
+    #[test]
+    fn y_copies_the_code_block_on_screen() {
+        // Padded so that the two blocks cannot be on screen together.
+        let filler = "Paragraph.\n\n".repeat(20);
+        let doc = format!("```sh\nfirst --block\n```\n\n{filler}```sh\nsecond --block\n```\n");
+        let mut p = pager_of(&doc, 10);
+        assert_eq!(
+            p.visible_code().map(String::as_str),
+            Some("first --block"),
+            "the first block on screen"
+        );
+
+        // Scrolled past it, the answer is the next one down.
+        press(&mut p, KeyCode::Char('G'));
+        assert_eq!(p.visible_code().map(String::as_str), Some("second --block"));
+    }
+
+    #[test]
+    fn y_says_so_when_there_is_no_code_on_screen() {
+        let mut p = pager_of("# Just a heading\n\nAnd a paragraph.\n", 10);
+        assert_eq!(p.visible_code(), None);
+        press(&mut p, KeyCode::Char('y'));
+        assert_eq!(p.message.as_deref(), Some("no code block on screen"));
+    }
+
+    #[test]
+    fn what_is_copied_is_the_source_not_the_drawing() {
+        // Line numbers, a background and syntax highlighting all change what is
+        // on screen; none of them belong in a paste.
+        let p = pager_of("```rust\nfn main() {\n    let x = 1;\n}\n```\n", 12);
+        let code = p.visible_code().map(String::as_str);
+        assert_eq!(code, Some("fn main() {\n    let x = 1;\n}"));
+        // No trailing newline, so a shell block pasted into a prompt waits to
+        // be read rather than running itself.
+        assert!(!code.unwrap().ends_with('\n'));
     }
 
     #[test]

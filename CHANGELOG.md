@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `y` in the pager copies the code block on screen to the system clipboard over
+  OSC 52, which works over ssh. It copies the source as written -- no
+  highlighting, no line numbers, no trailing newline, so a shell snippet lands
+  at a prompt without running. In the links panel, `y` copies the selected URL.
+  Inside tmux the text is handed to `tmux load-buffer -w`, since tmux does not
+  forward an application's OSC 52 unless `set-clipboard` is `on`.
 - A URL can be given instead of a file: `termmd https://example.com/README.md`
   fetches and renders it, resolving the relative links and images inside it
   against where it came from. Naming a URL is asking for it, so there is no flag

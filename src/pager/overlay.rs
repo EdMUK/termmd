@@ -43,6 +43,10 @@ pub const HELP: &[(&str, &str)] = &[
     ("backspace", "back to the previous document"),
     ("m", "give termmd the mouse, or give it back"),
     ("drag", "select text (the terminal's own selection)"),
+    (
+        "y",
+        "copy the code block on screen (L then y copies a link)",
+    ),
     ("i", "toggle images"),
     ("r", "reload"),
     ("H / F1", "this help"),

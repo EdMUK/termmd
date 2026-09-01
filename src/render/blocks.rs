@@ -25,6 +25,8 @@ pub(super) struct Ctx<'a> {
     /// Link destinations, in first-use order.
     pub links: Vec<String>,
     pub headings: Vec<HeadingEntry>,
+    /// Each code block's source, in the order they were laid out.
+    pub code_blocks: Vec<String>,
     /// Footnote label to its printed number.
     pub footnote_numbers: HashMap<String, usize>,
     /// Links to list at the end, in [`LinkMode::Reference`].
@@ -78,6 +80,7 @@ pub(super) fn render_document(
         highlighter,
         links: Vec::new(),
         headings: Vec::new(),
+        code_blocks: Vec::new(),
         footnote_numbers,
         reference_links: Vec::new(),
     };
@@ -120,6 +123,7 @@ pub(super) fn render_document(
     Screen {
         lines,
         links: ctx.links,
+        code_blocks: ctx.code_blocks,
         headings,
         anchors,
         width: opts.width,
@@ -343,6 +347,10 @@ fn prefix_first_line(lines: &mut [Line], marker: String, style: Style, width: us
 }
 
 fn code_block(language: Option<&str>, code: &str, ctx: &mut Ctx, width: usize) -> Vec<Line> {
+    // Kept as written, before tabs, highlighting or wrapping touch it: what
+    // `y` copies should be what the author typed, not what the terminal drew.
+    ctx.code_blocks.push(code.to_string());
+    let index = ctx.code_blocks.len() - 1;
     let expanded = expand_tabs(code, ctx.opts.tab_width);
     let highlighted = ctx.highlighter.highlight(&expanded, language);
 
@@ -414,6 +422,7 @@ fn code_block(language: Option<&str>, code: &str, ctx: &mut Ctx, width: usize) -
             ));
             line.prefix(prefix);
             super::pad_line_background(line, width, bg_style);
+            line.code = Some(index);
         }
         out.extend(wrapped);
     }

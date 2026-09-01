@@ -245,10 +245,19 @@ behaves. Use `--color=always` to keep the colour through a pipe.
 | `backspace` | Back to the previous document |
 | drag | Select text, as in any other terminal output |
 | `m` | Give termmd the mouse, so clicks follow links |
+| `y` | Copy the code block on screen (`L` then `y` copies a link) |
 | `i` | Toggle images |
 | `r` | Reload |
 | `H` `F1` | Help |
 | `q` `esc` | Quit |
+
+**Copying without the mouse.** `y` puts the code block you are looking at on the
+system clipboard, through OSC 52 — which works over ssh, because the bytes reach
+your terminal the same way the colours do. What it copies is the source as
+written, without the highlighting, the line numbers or the background, and
+without a trailing newline, so a shell snippet lands at your prompt rather than
+running itself. Inside tmux the text goes via `tmux load-buffer -w`, because tmux
+does not forward an application's OSC 52 unless `set-clipboard` is `on`.
 
 **The mouse belongs to your terminal.** Reporting the mouse to the application is
 what stops you dragging to select and copy, and selecting text is something

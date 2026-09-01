@@ -1,6 +1,7 @@
 //! Everything that depends on what the terminal on the other end can actually do.
 
 pub mod caps;
+pub mod clipboard;
 pub mod probe;
 pub mod style;
 pub mod tmux;
