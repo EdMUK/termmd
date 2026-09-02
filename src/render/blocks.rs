@@ -1,5 +1,6 @@
 //! Block layout: the part that decides what a document actually looks like.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use super::code::Highlighter;
@@ -9,7 +10,8 @@ use super::{
     HeadingEntry, ImagePlacement, ImageProvider, Line, LinkMode, RenderOptions, Screen, Span,
 };
 use crate::markdown::{
-    AlertKind, Block, Document, ImageRef, Inline, Inlines, List, ir_plain_text as plain_text,
+    AlertKind, Block, Document, ImageRef, Inline, Inlines, Leaf, List, ir_plain_text as plain_text,
+    plain_text_by,
 };
 use crate::term::caps::{Capabilities, GraphicsProtocol, UnicodeLevel};
 use crate::term::style::{Color, Style};
@@ -188,6 +190,27 @@ fn render_block(block: &Block, ctx: &mut Ctx, width: usize) -> Vec<Line> {
     }
 }
 
+/// A heading's text as the page draws it.
+///
+/// The parse tree keeps `:rocket:` and `$x^2$` as written, because whether they
+/// become a rocket and `x²` is decided at render time, by what the terminal can
+/// show. A table of contents built from the tree would read differently from
+/// the heading it points at, so it is built through this instead.
+pub fn heading_text(content: &[Inline], caps: &Capabilities) -> String {
+    plain_text_by(content, &heading_leaf(caps))
+}
+
+/// What each piece of a heading's text becomes on this terminal; the rule
+/// behind [`heading_text`], for callers that walk the tree themselves.
+pub fn heading_leaf(caps: &Capabilities) -> impl for<'a> Fn(Leaf, &'a str) -> Cow<'a, str> + use<> {
+    let unicode = caps.unicode == UnicodeLevel::Full;
+    move |leaf, text| match leaf {
+        Leaf::Text if unicode => super::emoji::expand(text),
+        Leaf::Math if unicode => Cow::Owned(super::math::to_unicode(text)),
+        _ => Cow::Borrowed(text),
+    }
+}
+
 fn heading(level: u8, id: &str, content: &Inlines, ctx: &mut Ctx, width: usize) -> Vec<Line> {
     let style = ctx.theme.heading(level);
     let marks = format!("{} ", "#".repeat(level as usize));
@@ -200,7 +223,7 @@ fn heading(level: u8, id: &str, content: &Inlines, ctx: &mut Ctx, width: usize) 
     let index = ctx.headings.len();
     ctx.headings.push(HeadingEntry {
         level,
-        text: plain_text(content),
+        text: heading_text(content, ctx.caps),
         id: id.to_string(),
         line: 0,
     });

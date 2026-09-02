@@ -9,6 +9,7 @@ pub use ir::plain_text as ir_plain_text;
 pub use ir::{
     AlertKind, Alignment, Block, Cell, Document, ImageRef, Inline, Inlines, List, ListItem, Table,
 };
+pub use ir::{Leaf, LeafText, plain_text_by};
 pub use ir::{UrlBase, rebase_urls};
 pub use parse::{ParseOptions, parse};
 pub use slug::Slugger;

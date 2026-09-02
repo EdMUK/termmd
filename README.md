@@ -225,7 +225,7 @@ behaves. Use `--color=always` to keep the colour through a pipe.
 | `--links <MODE>` | `auto`, `hyperlink`, `inline`, `reference`, `hide`. |
 | `-n`, `--line-numbers` | Line numbers beside code blocks. |
 | `--ascii` | Draw with ASCII only. |
-| `--watch` | Re-render when the file changes. |
+| `--watch` | Re-render when the file, directory or URL changes. A URL is fetched again every few seconds. |
 | `--front-matter` | Print the document's YAML front matter and exit. |
 | `--completions <SHELL>` | Write a completion script to stdout. |
 | `--man` | Write the man page, as roff, to stdout. |

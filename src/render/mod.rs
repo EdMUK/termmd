@@ -22,6 +22,7 @@ use crate::term::caps::Capabilities;
 use crate::term::style::{Color, Style, StyleWriter};
 use crate::theme::Theme;
 
+pub use blocks::{heading_leaf, heading_text};
 pub use code::Highlighter;
 pub use glyphs::Glyphs;
 pub use inline::Align;

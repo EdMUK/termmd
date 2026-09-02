@@ -16,6 +16,7 @@
 
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -24,6 +25,10 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 /// sequence may be, and quietly copying half a code block would be worse than
 /// saying no to all of it.
 const MAX_BYTES: usize = 64 * 1024;
+
+/// How long tmux gets to take the text. Generous for 64KB down a pipe, and
+/// short enough that a wedged server costs a pause rather than a pager.
+const TMUX_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// What the caller must do to finish the copy.
 #[derive(Debug, PartialEq, Eq)]
@@ -85,7 +90,7 @@ fn tmux_copy(text: &str) -> bool {
     }
     // Closing stdin before waiting, or tmux waits for an end that never comes.
     drop(child.stdin.take());
-    matches!(child.wait(), Ok(status) if status.success())
+    matches!(super::tmux::wait_within(&mut child, TMUX_TIMEOUT), Some(status) if status.success())
 }
 
 #[cfg(test)]

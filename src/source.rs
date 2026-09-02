@@ -160,7 +160,7 @@ pub fn as_url(name: &Path) -> Option<String> {
     (text.starts_with("http://") || text.starts_with("https://")).then(|| text.to_string())
 }
 
-fn fetch(url: &str) -> Result<String> {
+pub(crate) fn fetch(url: &str) -> Result<String> {
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(HTTP_TIMEOUT))
         .user_agent(concat!("termmd/", env!("CARGO_PKG_VERSION")))
@@ -415,6 +415,20 @@ pub fn watchable_paths(sources: &[Source]) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The URLs among `sources`, each with the text it holds now.
+///
+/// Nothing on the far side of a URL will tell us when it changes, so a watcher
+/// has to fetch it again and compare, and this is what it compares against.
+pub fn watchable_urls(sources: &[Source]) -> Vec<(String, String)> {
+    sources
+        .iter()
+        .filter_map(|s| match &s.origin {
+            Origin::Url(url) => Some((url.clone(), s.text.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,6 +443,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn only_urls_are_polled_and_only_paths_are_watched() {
+        let sources = vec![
+            source("a.md", "# A\n"),
+            Source {
+                origin: Origin::Url("https://example.com/b.md".into()),
+                name: "https://example.com/b.md".into(),
+                text: "# B\n".into(),
+            },
+        ];
+        assert_eq!(watchable_paths(&sources), vec![PathBuf::from("a.md")]);
+        assert_eq!(
+            watchable_urls(&sources),
+            vec![("https://example.com/b.md".to_string(), "# B\n".to_string())]
+        );
     }
 
     #[test]

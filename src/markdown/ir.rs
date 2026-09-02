@@ -5,6 +5,8 @@
 //! indent a nested list we need to know the whole subtree first. So the parser
 //! folds events into this tree once, and every later stage works on it.
 
+use std::borrow::Cow;
+
 /// A parsed document plus the bits of metadata worth keeping.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Document {
@@ -20,22 +22,28 @@ pub struct Document {
 impl Document {
     /// Headings in document order, for the table of contents.
     pub fn headings(&self) -> Vec<(u8, String, String)> {
+        self.headings_by(&|_, s| Cow::Borrowed(s))
+    }
+
+    /// Headings with their text flattened by `leaf`, so a table of contents
+    /// can show a heading the way the page draws it -- see [`plain_text_by`].
+    pub fn headings_by(&self, leaf: &LeafText<'_>) -> Vec<(u8, String, String)> {
         let mut out = Vec::new();
-        collect_headings(&self.blocks, &mut out);
+        collect_headings(&self.blocks, leaf, &mut out);
         out
     }
 }
 
-fn collect_headings(blocks: &[Block], out: &mut Vec<(u8, String, String)>) {
+fn collect_headings(blocks: &[Block], leaf: &LeafText<'_>, out: &mut Vec<(u8, String, String)>) {
     for b in blocks {
         match b {
             Block::Heading { level, id, content } => {
-                out.push((*level, plain_text(content), id.clone()));
+                out.push((*level, plain_text_by(content, leaf), id.clone()));
             }
-            Block::BlockQuote { blocks, .. } => collect_headings(blocks, out),
+            Block::BlockQuote { blocks, .. } => collect_headings(blocks, leaf, out),
             Block::List(list) => {
                 for item in &list.items {
-                    collect_headings(&item.blocks, out);
+                    collect_headings(&item.blocks, leaf, out);
                 }
             }
             _ => {}
@@ -43,20 +51,41 @@ fn collect_headings(blocks: &[Block], out: &mut Vec<(u8, String, String)>) {
     }
 }
 
+/// The kinds of text an inline tree bottoms out in. What a renderer does to
+/// each differs: a shortcode in prose becomes an emoji, the same characters
+/// in a code span stay as typed, and TeX becomes Unicode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Leaf {
+    Text,
+    Code,
+    Math,
+}
+
+/// How to turn a leaf's text into what should stand for it.
+pub type LeafText<'l> = dyn for<'a> Fn(Leaf, &'a str) -> Cow<'a, str> + 'l;
+
 /// Flattens inline content to plain text, for slugs, titles and search.
 pub fn plain_text(inlines: &[Inline]) -> String {
+    plain_text_by(inlines, &|_, s| Cow::Borrowed(s))
+}
+
+/// Flattens inline content, letting `leaf` say what each piece of text
+/// becomes. `plain_text` is this with the identity.
+pub fn plain_text_by(inlines: &[Inline], leaf: &LeafText<'_>) -> String {
     let mut s = String::new();
-    push_plain(inlines, &mut s);
+    push_plain(inlines, leaf, &mut s);
     s
 }
 
-fn push_plain(inlines: &[Inline], out: &mut String) {
+fn push_plain(inlines: &[Inline], leaf: &LeafText<'_>, out: &mut String) {
     for i in inlines {
         match i {
-            Inline::Text(t) | Inline::Code(t) | Inline::Math { text: t, .. } => out.push_str(t),
-            Inline::Emph(c) | Inline::Strong(c) | Inline::Strike(c) => push_plain(c, out),
-            Inline::Superscript(c) | Inline::Subscript(c) => push_plain(c, out),
-            Inline::Link { content, .. } => push_plain(content, out),
+            Inline::Text(t) => out.push_str(&leaf(Leaf::Text, t)),
+            Inline::Code(t) => out.push_str(&leaf(Leaf::Code, t)),
+            Inline::Math { text, .. } => out.push_str(&leaf(Leaf::Math, text)),
+            Inline::Emph(c) | Inline::Strong(c) | Inline::Strike(c) => push_plain(c, leaf, out),
+            Inline::Superscript(c) | Inline::Subscript(c) => push_plain(c, leaf, out),
+            Inline::Link { content, .. } => push_plain(content, leaf, out),
             Inline::Image(img) => out.push_str(&img.alt),
             Inline::SoftBreak | Inline::HardBreak => out.push(' '),
             Inline::FootnoteRef(label) => {

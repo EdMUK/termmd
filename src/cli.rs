@@ -87,7 +87,7 @@ pub struct Cli {
     #[arg(long)]
     pub ascii: bool,
 
-    /// Re-render when the file changes. Implies the pager.
+    /// Re-render when the file, directory or URL changes. Implies the pager.
     #[arg(long, conflicts_with = "no_pager")]
     pub watch: bool,
 

@@ -9,8 +9,10 @@ use clap::{CommandFactory, Parser};
 use termmd::cli::{Cli, Settings};
 use termmd::config::Config;
 use termmd::images::{RemotePolicy, Store};
-use termmd::markdown::Document;
-use termmd::render::{Highlighter, NoImages, Screen, WriteOptions};
+use termmd::markdown::{Document, ParseOptions};
+use termmd::render::{Highlighter, NoImages, Screen, WriteOptions, heading_leaf};
+use termmd::source::Source;
+use termmd::term::caps::Capabilities;
 
 fn main() {
     if let Err(error) = run() {
@@ -65,10 +67,13 @@ fn run() -> Result<()> {
     let sources = termmd::source::read(&cli.files)?;
 
     if cli.toc {
-        return print_toc(&termmd::source::build_document(&sources, settings.parse));
+        return print_toc(
+            &termmd::source::build_document(&sources, settings.parse),
+            &settings.caps,
+        );
     }
     if cli.front_matter {
-        return print_front_matter(&termmd::source::build_document(&sources, settings.parse));
+        return print_front_matter(&sources, settings.parse);
     }
 
     let remote = if settings.remote_images {
@@ -223,10 +228,12 @@ fn load_config(cli: &Cli) -> Result<Config> {
     }
 }
 
-fn print_toc(document: &Document) -> Result<()> {
+/// Prints the headings as the page would draw them, so a `:rocket:` or a
+/// formula reads the same here as in the document it points into.
+fn print_toc(document: &Document, caps: &Capabilities) -> Result<()> {
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
-    for (level, text, id) in document.headings() {
+    for (level, text, id) in document.headings_by(&heading_leaf(caps)) {
         let indent = "  ".repeat(level.saturating_sub(1) as usize);
         writeln!(out, "{indent}{text}  #{id}")?;
     }
@@ -238,13 +245,26 @@ fn print_toc(document: &Document) -> Result<()> {
 /// It is metadata for whatever publishes the document, not part of it, so the
 /// page has no place for it -- but a script that wants a document's title or
 /// tags should not have to parse the file a second time to get them.
-fn print_front_matter(document: &Document) -> Result<()> {
-    let Some(text) = document.front_matter.as_deref() else {
-        return Ok(());
-    };
+///
+/// Each file's front matter is its own, so this looks at the files one at a
+/// time rather than at the merged document, which keeps only the first. With
+/// several files each block is introduced by a `---` line naming its file: a
+/// YAML document marker with a comment, so the whole output is still one YAML
+/// stream for a script to read.
+fn print_front_matter(sources: &[Source], options: ParseOptions) -> Result<()> {
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
-    writeln!(out, "{}", text.trim_end())?;
+    let several = sources.len() > 1;
+    for source in sources {
+        let document = termmd::markdown::parse(&source.text, options);
+        let Some(text) = document.front_matter.as_deref() else {
+            continue;
+        };
+        if several {
+            writeln!(out, "--- # {}", source.name)?;
+        }
+        writeln!(out, "{}", text.trim_end())?;
+    }
     Ok(out.flush()?)
 }
 

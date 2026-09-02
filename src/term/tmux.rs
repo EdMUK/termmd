@@ -23,7 +23,15 @@
 //! which leaves us on the conservative path we were on anyway.
 
 use std::env;
-use std::process::Command;
+use std::io::Read;
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+/// How long tmux gets to answer. A live server replies in a millisecond or
+/// two; a wedged one would otherwise hold termmd at startup, when the whole
+/// point of asking was to fall back gracefully.
+const TIMEOUT: Duration = Duration::from_millis(500);
 
 /// What tmux says its client can do.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -44,7 +52,7 @@ pub fn features() -> Option<Features> {
     // Targeting our own pane matters when more than one client is attached:
     // the answer is per-client, and the one showing this pane is the one whose
     // capabilities we are about to rely on.
-    let out = Command::new("tmux")
+    let mut child = Command::new("tmux")
         .args([
             "display-message",
             "-p",
@@ -52,12 +60,39 @@ pub fn features() -> Option<Features> {
             &pane,
             "#{client_termfeatures}",
         ])
-        .output()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
         .ok()?;
-    if !out.status.success() {
+    let status = wait_within(&mut child, TIMEOUT)?;
+    if !status.success() {
         return None;
     }
-    Some(parse(&String::from_utf8_lossy(&out.stdout)))
+    // Read after waiting is safe only because the answer is one short line,
+    // far below what a pipe holds before its writer would block.
+    let mut out = String::new();
+    child.stdout.take()?.read_to_string(&mut out).ok()?;
+    Some(parse(&out))
+}
+
+/// Waits for `child` to exit, and kills it if `timeout` passes first.
+///
+/// `None` means it was killed: whatever it was going to say, it did not say
+/// it in time, and the caller should carry on as if it had not been asked.
+pub(crate) fn wait_within(child: &mut Child, timeout: Duration) -> Option<ExitStatus> {
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status),
+            Ok(None) if start.elapsed() < timeout => thread::sleep(Duration::from_millis(5)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
 }
 
 /// Picks the two features we care about out of tmux's comma-separated list.
@@ -103,6 +138,24 @@ mod tests {
         // failed lookup gives us nothing to split.
         assert_eq!(parse(""), Features::default());
         assert_eq!(parse("\n"), Features::default());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_process_that_does_not_finish_is_killed() {
+        let mut slow = Command::new("sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .spawn()
+            .unwrap();
+        let start = Instant::now();
+        assert_eq!(wait_within(&mut slow, Duration::from_millis(50)), None);
+        assert!(start.elapsed() < Duration::from_secs(5), "did not give up");
+        // And it is gone, not left behind.
+        assert!(matches!(slow.try_wait(), Ok(Some(_))));
+
+        let mut quick = Command::new("true").spawn().unwrap();
+        assert!(wait_within(&mut quick, Duration::from_secs(5)).is_some_and(|s| s.success()));
     }
 
     #[test]

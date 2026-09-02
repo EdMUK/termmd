@@ -42,6 +42,10 @@ use search::Search;
 const TICK: Duration = Duration::from_millis(150);
 /// A file save often arrives as several events; wait for them to settle.
 const RELOAD_DEBOUNCE: Duration = Duration::from_millis(120);
+/// How often a watched URL is fetched again. A file watcher is told about a
+/// change; a URL has to be asked, and asking a server every few seconds is
+/// polite enough for a document someone is editing at the other end.
+const URL_POLL: Duration = Duration::from_secs(5);
 
 /// What the pager is currently doing.
 #[derive(Debug, Clone, PartialEq)]
@@ -92,10 +96,13 @@ pub fn run(
         return Ok(());
     }
 
-    let watched = if watch {
-        crate::source::watchable_paths(sources)
+    let (watched, polled) = if watch {
+        (
+            crate::source::watchable_paths(sources),
+            crate::source::watchable_urls(sources),
+        )
     } else {
-        Vec::new()
+        (Vec::new(), Vec::new())
     };
     let mut pager = Pager {
         sources: sources.to_vec(),
@@ -118,7 +125,7 @@ pub fn run(
         quit: false,
     };
     let _guard = TerminalGuard::enter(settings.mouse)?;
-    pager.event_loop(&watched)
+    pager.event_loop(&watched, &polled)
 }
 
 fn render(
@@ -191,8 +198,8 @@ impl Pager<'_> {
         self.screen.len().saturating_sub(self.viewport())
     }
 
-    fn event_loop(&mut self, watched: &[PathBuf]) -> Result<()> {
-        let mut watcher = FileWatcher::start(watched);
+    fn event_loop(&mut self, watched: &[PathBuf], polled: &[(String, String)]) -> Result<()> {
+        let mut watcher = FileWatcher::start(watched, polled);
 
         while !self.quit {
             // Redrawing only when something changed keeps an idle pager at zero
@@ -1074,6 +1081,9 @@ fn restore() -> Result<()> {
 }
 
 /// Watches files for changes, debounced.
+/// Notices when a source changes: files and directories through the OS, URLs
+/// by fetching them again. Both arrive on one channel, so the pager reloads
+/// the same way whichever kind moved.
 struct FileWatcher {
     receiver: Option<std::sync::mpsc::Receiver<()>>,
     /// Kept alive: dropping the watcher stops the notifications.
@@ -1082,8 +1092,8 @@ struct FileWatcher {
 }
 
 impl FileWatcher {
-    fn start(paths: &[PathBuf]) -> Self {
-        if paths.is_empty() {
+    fn start(paths: &[PathBuf], urls: &[(String, String)]) -> Self {
+        if paths.is_empty() && urls.is_empty() {
             return Self {
                 receiver: None,
                 _watcher: None,
@@ -1091,6 +1101,35 @@ impl FileWatcher {
             };
         }
         let (tx, rx) = std::sync::mpsc::channel();
+
+        for (url, text) in urls {
+            let tx = tx.clone();
+            let url = url.clone();
+            let mut last = text.clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(URL_POLL);
+                    // A failed fetch is not a change: a server that is briefly
+                    // away has not edited the document.
+                    if let Ok(now) = source::fetch(&url) {
+                        if now != last {
+                            last = now;
+                            if tx.send(()).is_err() {
+                                return;
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        if paths.is_empty() {
+            return Self {
+                receiver: Some(rx),
+                _watcher: None,
+                pending: None,
+            };
+        }
         let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
             if let Ok(event) = event {
                 if event.kind.is_modify() || event.kind.is_create() {
@@ -1100,7 +1139,7 @@ impl FileWatcher {
         });
         let Ok(mut watcher) = watcher else {
             return Self {
-                receiver: None,
+                receiver: Some(rx),
                 _watcher: None,
                 pending: None,
             };

@@ -12,8 +12,13 @@ fn run(args: &[&str]) -> (String, String, bool) {
 }
 
 fn run_with_stdin(args: &[&str], stdin: &str) -> (String, String, bool) {
+    run_with_env(args, stdin, &[])
+}
+
+fn run_with_env(args: &[&str], stdin: &str, env: &[(&str, &str)]) -> (String, String, bool) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_termmd"))
         .args(args)
+        .envs(env.iter().copied())
         // A fixed environment keeps results the same on a developer's machine
         // and in CI, where TERM and friends differ wildly.
         .env_remove("TERM_PROGRAM")
@@ -128,6 +133,21 @@ fn prints_a_table_of_contents() {
         !out.contains("paragraph"),
         "TOC should list headings only: {out}"
     );
+}
+
+#[test]
+fn the_table_of_contents_reads_as_the_page_does() {
+    // A shortcode and a formula are expanded when the page is drawn, not when
+    // it is parsed. The contents must follow the page, not the source.
+    let heading = "# Launch :rocket: $x^2$\n\ntext\n";
+    let utf8 = [("LANG", "C.UTF-8")];
+    let (out, _, ok) = run_with_env(&["--toc", "-"], heading, &utf8);
+    assert!(ok);
+    assert!(out.contains("Launch 🚀 x²"), "{out}");
+    // Under --ascii the page keeps the names, so the contents do too.
+    let (out, _, ok) = run_with_env(&["--toc", "--ascii", "-"], heading, &utf8);
+    assert!(ok);
+    assert!(out.contains("Launch :rocket: x^2"), "{out}");
 }
 
 #[test]
@@ -453,6 +473,29 @@ fn prints_front_matter_when_asked() {
     let (out, err, ok) = run(&["--front-matter", &fixture("sample.md")]);
     assert!(ok, "{err}");
     assert!(out.trim().is_empty(), "{out}");
+}
+
+#[test]
+fn front_matter_is_printed_for_every_file_given() {
+    // Several files: each block is introduced by a `---` line naming its file,
+    // which is a YAML document marker plus a comment, so the output is still
+    // one YAML stream. A file without any contributes nothing, not a header.
+    let with = fixture("front-matter.md");
+    let (out, err, ok) = run(&["--front-matter", &with, &fixture("sample.md"), &with]);
+    assert!(ok, "{err}");
+    let markers: Vec<&str> = out.lines().filter(|l| l.starts_with("--- # ")).collect();
+    assert_eq!(markers.len(), 2, "{out}");
+    assert!(markers[0].ends_with("front-matter.md"), "{out}");
+    assert_eq!(
+        out.matches("title: Fixture with front matter").count(),
+        2,
+        "{out}"
+    );
+    assert!(!out.contains("sample.md"), "{out}");
+
+    // One file, as before: no marker, just the front matter.
+    let (out, _, _) = run(&["--front-matter", &with]);
+    assert!(!out.contains("--- #"), "{out}");
 }
 
 #[test]

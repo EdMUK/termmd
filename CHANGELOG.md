@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `--toc` and the contents panel showed a heading as written -- `:rocket:`,
+  `$x^2$` -- while the page showed a rocket and `x²`. Both are expanded when
+  the page is drawn, so the terminal can opt out with `--ascii`, and the table
+  of contents was built from the parse tree instead. It now reads the way the
+  page does, under `--ascii` too.
+- `--watch` on a URL did nothing, silently. Nothing on the far side of a URL
+  announces a change, so termmd now fetches it again every five seconds and
+  reloads when the text differs.
+- `--front-matter` over several files printed only the first file's. It now
+  prints each file's, introduced by a `--- # name` line when there is more
+  than one, so the output is still one YAML stream.
+- termmd asked tmux what its client can draw with no limit on how long tmux
+  might take to answer, so a wedged server held termmd at startup rather than
+  leaving it on half blocks. The question is now given half a second, and
+  handing a copy to `tmux load-buffer` two.
+
 ## [0.1.3] - 2026-09-02
 
 More places a document can come from, more of it drawn, and one crash fixed:
