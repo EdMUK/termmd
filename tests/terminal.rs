@@ -56,6 +56,9 @@ impl Pty {
             ws_xpixel: 0,
             ws_ypixel: 0,
         };
+        // Linux declares the size a const pointer and macOS a mutable one;
+        // going through a raw pointer satisfies both.
+        let size_ptr: *mut libc::winsize = &mut size;
         // SAFETY: openpty writes two descriptors into the integers we pass
         // and reads the winsize; nothing else is touched.
         let rc = unsafe {
@@ -64,7 +67,7 @@ impl Pty {
                 &mut slave,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
-                &mut size,
+                size_ptr as _,
             )
         };
         assert_eq!(rc, 0, "openpty failed");
