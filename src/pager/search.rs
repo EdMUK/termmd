@@ -307,6 +307,17 @@ mod tests {
     }
 
     #[test]
+    fn focus_before_finds_the_previous_match_above() {
+        let mut s = Search::new("a", &screen_of(&["a", "b", "a"]));
+        assert_eq!(s.focus_before(2).unwrap().line, 0, "strictly above, not at");
+        assert_eq!(
+            s.focus_before(0).unwrap().line,
+            2,
+            "wraps when nothing is above"
+        );
+    }
+
+    #[test]
     fn handles_text_whose_case_changes_length() {
         // 'İ' lowercases to two code points, so byte offsets shift.
         let s = Search::new("x", &screen_of(&["İx"]));
