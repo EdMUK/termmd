@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `?` searched forwards while you typed. The incremental search followed the
+  first match at or after the top of the screen whichever way had been asked
+  for, so a backward search jumped down the document as the pattern grew and
+  only went the right way on Enter. It now follows the nearest match above
+  where the reader was when the prompt opened, and Enter keeps it.
+- `/` could skip the match it had just shown. Enter searched again from the
+  top of the screen, which the incremental scroll had already moved, so a
+  search that wrapped to the top of the document landed one match further on.
+  Enter now accepts the match typing found.
+
 ## [0.1.4] - 2026-09-03
 
 Four small things noticed while 0.1.3 was going out, none of them about how a

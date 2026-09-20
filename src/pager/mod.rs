@@ -117,6 +117,7 @@ pub fn run(
         rows: settings.caps.rows,
         mode: Mode::Normal,
         search: None,
+        search_anchor: 0,
         input: String::new(),
         message: None,
         selection: 0,
@@ -170,6 +171,10 @@ struct Pager<'a> {
     rows: u16,
     mode: Mode,
     search: Option<Search>,
+    /// Where the reader was looking when the search prompt opened. Typing
+    /// scrolls the view to follow matches, so the prompt's own starting point
+    /// has to be remembered rather than read back from `top`.
+    search_anchor: usize,
     input: String,
     message: Option<String>,
     /// Selected row in the open panel.
@@ -244,7 +249,7 @@ impl Pager<'_> {
         }
         self.message = None;
         match self.mode.clone() {
-            Mode::Searching { backward } => self.on_search_key(key, backward),
+            Mode::Searching { .. } => self.on_search_key(key),
             Mode::Panel(panel) => self.on_panel_key(key, panel),
             Mode::Normal => self.on_normal_key(key),
         }
@@ -320,10 +325,12 @@ impl Pager<'_> {
 
             KeyCode::Char('/') => {
                 self.mode = Mode::Searching { backward: false };
+                self.search_anchor = self.top;
                 self.input.clear();
             }
             KeyCode::Char('?') => {
                 self.mode = Mode::Searching { backward: true };
+                self.search_anchor = self.top;
                 self.input.clear();
             }
             KeyCode::Char('n') => self.jump_search(false),
@@ -344,7 +351,7 @@ impl Pager<'_> {
         Ok(())
     }
 
-    fn on_search_key(&mut self, key: KeyEvent, backward: bool) -> Result<()> {
+    fn on_search_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Esc => {
                 self.mode = Mode::Normal;
@@ -353,21 +360,16 @@ impl Pager<'_> {
             }
             KeyCode::Enter => {
                 self.mode = Mode::Normal;
-                if let Some(search) = &mut self.search {
+                if let Some(search) = &self.search {
                     if search.is_empty() {
                         self.message = Some(format!("not found: {}", self.input));
-                    } else {
-                        // Jump from where the reader is looking, not from the
-                        // top of the document.
-                        let from = if backward { 0 } else { self.top + 1 };
-                        let target = if backward {
-                            search.retreat()
-                        } else {
-                            search.focus_from(from)
-                        };
-                        if let Some(m) = target {
-                            self.scroll_to(m.line);
-                        }
+                    } else if let Some(m) = search.focused() {
+                        // Typing already focused the right match, in the right
+                        // direction from where the reader started. Searching
+                        // again from `top` would start from wherever the
+                        // incremental scroll left it, which is how a search
+                        // used to skip the match it had just shown.
+                        self.scroll_to(m.line);
                     }
                 }
             }
@@ -566,14 +568,22 @@ impl Pager<'_> {
     }
 
     fn update_search(&mut self) {
-        let search = Search::new(&self.input, &self.screen);
+        let backward = matches!(self.mode, Mode::Searching { backward: true });
+        let anchor = self.search_anchor;
+        let mut search = Search::new(&self.input, &self.screen);
+        // Follow the nearest match while typing, so the search is incremental:
+        // the first one at or after where the reader started for `/`, the last
+        // one before it for `?`. From the anchor rather than from `top`, because
+        // following a match moves `top`, and a backward search that measured
+        // from there would drift forwards with every keystroke.
+        let target = if backward {
+            search.focus_before(anchor)
+        } else {
+            search.focus_from(anchor)
+        };
         self.search = Some(search);
-        // Follow the first match while typing, so the search is incremental.
-        if let Some(s) = &mut self.search {
-            if let Some(m) = s.focus_from(self.top) {
-                let line = m.line;
-                self.scroll_into_view(line);
-            }
+        if let Some(m) = target {
+            self.scroll_into_view(m.line);
         }
     }
 
@@ -1238,6 +1248,7 @@ mod tests {
             rows,
             mode: Mode::Normal,
             search: None,
+            search_anchor: 0,
             input: String::new(),
             message: None,
             selection: 0,
@@ -1359,6 +1370,59 @@ mod tests {
             p.top <= 42 && p.top + p.viewport() > 42,
             "match should be on screen"
         );
+    }
+
+    #[test]
+    fn a_forward_search_lands_on_the_match_it_showed_while_typing() {
+        // Nothing at or after line 50 matches "line 1", so typing wraps to line
+        // 1 and shows it. Enter must keep that match, not move on to line 10.
+        let mut p = pager(100, 25);
+        p.top = 50;
+        press(&mut p, KeyCode::Char('/'));
+        for c in "line 1".chars() {
+            press(&mut p, KeyCode::Char(c));
+        }
+        assert_eq!(p.search.as_ref().unwrap().focused().unwrap().line, 1);
+        press(&mut p, KeyCode::Enter);
+        assert_eq!(p.search.as_ref().unwrap().focused().unwrap().line, 1);
+        assert!(p.top <= 1, "the match should be on screen: top={}", p.top);
+    }
+
+    #[test]
+    fn a_backward_search_looks_above_the_reader() {
+        // From line 50, "line 1" matches lines 1 and 10..19, all above. `?`
+        // should settle on 19, the nearest one above, and never visit line 1.
+        let mut p = pager(100, 25);
+        p.top = 50;
+        press(&mut p, KeyCode::Char('?'));
+        for c in "line 1".chars() {
+            press(&mut p, KeyCode::Char(c));
+            let s = p.search.as_ref().unwrap();
+            if !s.is_empty() {
+                assert!(
+                    s.focused().unwrap().line < 50,
+                    "typing followed a match forwards: {:?}",
+                    s.focused()
+                );
+            }
+        }
+        assert_eq!(p.search.as_ref().unwrap().focused().unwrap().line, 19);
+        press(&mut p, KeyCode::Enter);
+        assert_eq!(p.search.as_ref().unwrap().focused().unwrap().line, 19);
+        assert!(p.top <= 19 && p.top + p.viewport() > 19, "top={}", p.top);
+    }
+
+    #[test]
+    fn a_backward_search_from_the_top_wraps_to_the_end() {
+        // Nothing above line 0, so `?` wraps to the last match, as `/` wraps to
+        // the first when nothing is below.
+        let mut p = pager(100, 25);
+        press(&mut p, KeyCode::Char('?'));
+        for c in "line 1".chars() {
+            press(&mut p, KeyCode::Char(c));
+        }
+        press(&mut p, KeyCode::Enter);
+        assert_eq!(p.search.as_ref().unwrap().focused().unwrap().line, 19);
     }
 
     #[test]

@@ -69,6 +69,20 @@ impl Search {
         Some(self.matches[index])
     }
 
+    /// Focuses the last match before `line`, wrapping around to the end.
+    pub fn focus_before(&mut self, line: usize) -> Option<Match> {
+        if self.matches.is_empty() {
+            return None;
+        }
+        let index = self
+            .matches
+            .iter()
+            .rposition(|m| m.line < line)
+            .unwrap_or(self.matches.len() - 1);
+        self.current = index;
+        Some(self.matches[index])
+    }
+
     /// Moves to the next match, wrapping.
     pub fn advance(&mut self) -> Option<Match> {
         if self.matches.is_empty() {
