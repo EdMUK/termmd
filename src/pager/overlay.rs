@@ -37,7 +37,7 @@ pub const HELP: &[(&str, &str)] = &[
     ("0", "back to the left edge"),
     ("/", "search forwards"),
     ("? ", "search backwards"),
-    ("n / N", "next or previous match"),
+    ("n / N", "repeat the search, or reverse it"),
     ("t", "table of contents"),
     ("L", "links"),
     ("backspace", "back to the previous document"),

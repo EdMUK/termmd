@@ -239,7 +239,7 @@ behaves. Use `--color=always` to keep the colour through a pipe.
 | `d` `u` | Scroll half a page |
 | `g` `G` | Start, end |
 | `h` `l` `0` | Scroll sideways |
-| `/` `?` `n` `N` | Search forwards, backwards, next, previous |
+| `/` `?` `n` `N` | Search forwards, backwards, repeat, reverse |
 | `t` | Table of contents |
 | `L` | Links |
 | `backspace` | Back to the previous document |

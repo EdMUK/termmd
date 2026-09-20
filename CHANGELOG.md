@@ -6,17 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Fixed
+### Changed
 
-- `?` searched forwards while you typed. The incremental search followed the
-  first match at or after the top of the screen whichever way had been asked
-  for, so a backward search jumped down the document as the pattern grew and
-  only went the right way on Enter. It now follows the nearest match above
-  where the reader was when the prompt opened, and Enter keeps it.
-- `/` could skip the match it had just shown. Enter searched again from the
-  top of the screen, which the incremental scroll had already moved, so a
-  search that wrapped to the top of the document landed one match further on.
-  Enter now accepts the match typing found.
+- Search in the pager follows vim's rules, all of them, instead of some of
+  them. There is one notion of where the reader is: the current match while it
+  is on screen, otherwise the top of the screen. `/` and `?` preview from
+  there as the pattern is typed, Esc puts the view and the previous search back
+  as if the prompt had never opened, and Enter accepts what the preview showed
+  without moving again. `n` repeats the last search in the direction it was
+  made, `N` goes the other way, both from where the reader is now, and a wrap
+  is announced. Before, `?` followed matches forwards while it was typed and
+  only went backwards on Enter, `/` could skip the match it had just shown
+  when it wrapped, `n` after `?` went forwards, Esc left the view wherever the
+  preview had scrolled it, and `n` after scrolling away jumped relative to a
+  match the reader had left rather than to what was on screen.
 
 ## [0.1.4] - 2026-09-03
 

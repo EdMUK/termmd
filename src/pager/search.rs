@@ -20,6 +20,17 @@ pub struct Match {
     pub end: usize,
 }
 
+/// Where the reader is, for deciding which match comes next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cursor {
+    /// On a particular match. The next one is strictly after it, even on the
+    /// same line, and the previous one strictly before.
+    Match(Match),
+    /// On a line with no match under the reader. Forwards includes the line
+    /// itself; backwards starts above it.
+    Line(usize),
+}
+
 /// The state of a search: what was asked for, and what was found.
 #[derive(Debug, Clone, Default)]
 pub struct Search {
@@ -55,54 +66,36 @@ impl Search {
         self.matches.len()
     }
 
-    /// Focuses the first match at or after `line`, wrapping around the end.
-    pub fn focus_from(&mut self, line: usize) -> Option<Match> {
+    /// Focuses the match after `cursor`, or before it when `backward`, wrapping
+    /// around the document. Says whether it wrapped, so the pager can mention it.
+    ///
+    /// This is the one rule every movement uses: the prompt previews with it,
+    /// `n` and `N` step with it, and what differs between them is only the
+    /// cursor they hand in. Matches are in document order, so the neighbour is
+    /// a position search either way.
+    pub fn step(&mut self, cursor: Cursor, backward: bool) -> Option<(Match, bool)> {
         if self.matches.is_empty() {
             return None;
         }
-        let index = self
-            .matches
-            .iter()
-            .position(|m| m.line >= line)
-            .unwrap_or(0);
-        self.current = index;
-        Some(self.matches[index])
-    }
-
-    /// Focuses the last match before `line`, wrapping around to the end.
-    pub fn focus_before(&mut self, line: usize) -> Option<Match> {
-        if self.matches.is_empty() {
-            return None;
-        }
-        let index = self
-            .matches
-            .iter()
-            .rposition(|m| m.line < line)
-            .unwrap_or(self.matches.len() - 1);
-        self.current = index;
-        Some(self.matches[index])
-    }
-
-    /// Moves to the next match, wrapping.
-    pub fn advance(&mut self) -> Option<Match> {
-        if self.matches.is_empty() {
-            return None;
-        }
-        self.current = (self.current + 1) % self.matches.len();
-        Some(self.matches[self.current])
-    }
-
-    /// Moves to the previous match, wrapping.
-    pub fn retreat(&mut self) -> Option<Match> {
-        if self.matches.is_empty() {
-            return None;
-        }
-        self.current = if self.current == 0 {
-            self.matches.len() - 1
+        let key = |m: &Match| (m.line, m.start);
+        let found = if backward {
+            self.matches.iter().rposition(|m| match cursor {
+                Cursor::Match(c) => key(m) < key(&c),
+                Cursor::Line(line) => m.line < line,
+            })
         } else {
-            self.current - 1
+            self.matches.iter().position(|m| match cursor {
+                Cursor::Match(c) => key(m) > key(&c),
+                Cursor::Line(line) => m.line >= line,
+            })
         };
-        Some(self.matches[self.current])
+        let (index, wrapped) = match found {
+            Some(i) => (i, false),
+            None if backward => (self.matches.len() - 1, true),
+            None => (0, true),
+        };
+        self.current = index;
+        Some((self.matches[index], wrapped))
     }
 
     pub fn focused(&self) -> Option<Match> {
@@ -289,32 +282,49 @@ mod tests {
     }
 
     #[test]
-    fn navigation_wraps_in_both_directions() {
-        let mut s = Search::new("a", &screen_of(&["a", "a", "a"]));
-        assert_eq!(s.focused().unwrap().line, 0);
-        s.advance();
-        s.advance();
-        assert_eq!(s.focused().unwrap().line, 2);
-        assert_eq!(s.advance().unwrap().line, 0, "should wrap to the start");
-        assert_eq!(s.retreat().unwrap().line, 2, "should wrap to the end");
-    }
-
-    #[test]
-    fn focus_from_finds_the_next_match_below() {
-        let mut s = Search::new("a", &screen_of(&["a", "b", "a"]));
-        assert_eq!(s.focus_from(1).unwrap().line, 2);
-        assert_eq!(s.focus_from(99).unwrap().line, 0, "wraps when past the end");
-    }
-
-    #[test]
-    fn focus_before_finds_the_previous_match_above() {
-        let mut s = Search::new("a", &screen_of(&["a", "b", "a"]));
-        assert_eq!(s.focus_before(2).unwrap().line, 0, "strictly above, not at");
+    fn steps_between_matches_and_wraps_at_both_ends() {
+        // Two matches on the first line count separately.
+        let mut s = Search::new("a", &screen_of(&["a a", "b", "a"]));
+        let first = s.focused().unwrap();
+        let (m, wrapped) = s.step(Cursor::Match(first), false).unwrap();
+        assert_eq!((m.line, m.start, wrapped), (0, 2, false));
+        let (m, wrapped) = s.step(Cursor::Match(m), false).unwrap();
+        assert_eq!((m.line, wrapped), (2, false));
+        let (m, wrapped) = s.step(Cursor::Match(m), false).unwrap();
         assert_eq!(
-            s.focus_before(0).unwrap().line,
-            2,
-            "wraps when nothing is above"
+            (m.line, m.start, wrapped),
+            (0, 0, true),
+            "wraps to the start"
         );
+        let (m, wrapped) = s.step(Cursor::Match(m), true).unwrap();
+        assert_eq!((m.line, wrapped), (2, true), "wraps to the end");
+    }
+
+    #[test]
+    fn a_line_counts_going_forwards_and_not_going_backwards() {
+        let mut s = Search::new("a", &screen_of(&["a", "b", "a"]));
+        let (m, _) = s.step(Cursor::Line(2), false).unwrap();
+        assert_eq!(m.line, 2, "a match on the line itself is the next one");
+        let (m, _) = s.step(Cursor::Line(2), true).unwrap();
+        assert_eq!(m.line, 0, "backwards starts above the line");
+        let (m, wrapped) = s.step(Cursor::Line(0), true).unwrap();
+        assert_eq!(
+            (m.line, wrapped),
+            (2, true),
+            "nothing above wraps to the end"
+        );
+        let (m, wrapped) = s.step(Cursor::Line(99), false).unwrap();
+        assert_eq!(
+            (m.line, wrapped),
+            (0, true),
+            "nothing below wraps to the start"
+        );
+    }
+
+    #[test]
+    fn nothing_to_step_to_without_matches() {
+        let mut s = Search::new("zz", &screen_of(&["a"]));
+        assert!(s.step(Cursor::Line(0), false).is_none());
     }
 
     #[test]

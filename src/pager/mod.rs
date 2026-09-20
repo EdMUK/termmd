@@ -36,7 +36,7 @@ use crate::source::{self, Origin, Source, build_document};
 use crate::term::caps::GraphicsProtocol;
 use crate::term::clipboard;
 use crate::term::style::StyleWriter;
-use search::Search;
+use search::{Cursor, Search};
 
 /// How long to wait for input before looking at the file watcher again.
 const TICK: Duration = Duration::from_millis(150);
@@ -51,12 +51,22 @@ const URL_POLL: Duration = Duration::from_secs(5);
 #[derive(Debug, Clone, PartialEq)]
 enum Mode {
     Normal,
-    /// Typing a search query. `backward` remembers which way to jump on accept.
+    /// Typing a search query. `backward` is which way it looks.
     Searching {
         backward: bool,
     },
     /// An overlay panel is open.
     Panel(Panel),
+}
+
+/// What a search prompt remembers about the moment it opened: enough for Esc
+/// to put everything back, and for typing to measure from where the reader
+/// was rather than from wherever the preview has scrolled to since.
+struct Prompt {
+    top: usize,
+    cursor: Cursor,
+    /// The search in force before the prompt opened, restored on Esc.
+    prior: Option<Search>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,7 +127,8 @@ pub fn run(
         rows: settings.caps.rows,
         mode: Mode::Normal,
         search: None,
-        search_anchor: 0,
+        prompt: None,
+        search_backward: false,
         input: String::new(),
         message: None,
         selection: 0,
@@ -171,10 +182,11 @@ struct Pager<'a> {
     rows: u16,
     mode: Mode,
     search: Option<Search>,
-    /// Where the reader was looking when the search prompt opened. Typing
-    /// scrolls the view to follow matches, so the prompt's own starting point
-    /// has to be remembered rather than read back from `top`.
-    search_anchor: usize,
+    /// Open while a query is being typed.
+    prompt: Option<Prompt>,
+    /// Which way the last accepted search looked. `n` repeats it and `N`
+    /// reverses it, as in vi, rather than always going down and up.
+    search_backward: bool,
     input: String,
     message: Option<String>,
     /// Selected row in the open panel.
@@ -323,18 +335,10 @@ impl Pager<'_> {
             KeyCode::Char('l') | KeyCode::Right => self.left = (self.left + 4).min(self.max_left()),
             KeyCode::Char('0') => self.left = 0,
 
-            KeyCode::Char('/') => {
-                self.mode = Mode::Searching { backward: false };
-                self.search_anchor = self.top;
-                self.input.clear();
-            }
-            KeyCode::Char('?') => {
-                self.mode = Mode::Searching { backward: true };
-                self.search_anchor = self.top;
-                self.input.clear();
-            }
-            KeyCode::Char('n') => self.jump_search(false),
-            KeyCode::Char('N') => self.jump_search(true),
+            KeyCode::Char('/') => self.open_prompt(false),
+            KeyCode::Char('?') => self.open_prompt(true),
+            KeyCode::Char('n') => self.repeat_search(false),
+            KeyCode::Char('N') => self.repeat_search(true),
 
             KeyCode::Char('t') => self.open_panel(Panel::Contents),
             KeyCode::Char('L') => self.open_panel(Panel::Links),
@@ -354,22 +358,30 @@ impl Pager<'_> {
     fn on_search_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Esc => {
+                // As if the prompt had never opened: the view goes back, and
+                // so does whatever search was in force before it.
                 self.mode = Mode::Normal;
-                self.search = None;
                 self.input.clear();
+                if let Some(prompt) = self.prompt.take() {
+                    self.top = prompt.top;
+                    self.search = prompt.prior;
+                }
             }
             KeyCode::Enter => {
+                let backward = matches!(self.mode, Mode::Searching { backward: true });
                 self.mode = Mode::Normal;
-                if let Some(search) = &self.search {
-                    if search.is_empty() {
+                let prompt = self.prompt.take();
+                match &self.search {
+                    // Typing already previewed the match; accepting is only a
+                    // matter of remembering which way to go from it.
+                    Some(search) if !search.is_empty() => self.search_backward = backward,
+                    _ => {
+                        // Nothing found leaves the reader where they were. The
+                        // pattern is kept, so `n` can say the same thing.
                         self.message = Some(format!("not found: {}", self.input));
-                    } else if let Some(m) = search.focused() {
-                        // Typing already focused the right match, in the right
-                        // direction from where the reader started. Searching
-                        // again from `top` would start from wherever the
-                        // incremental scroll left it, which is how a search
-                        // used to skip the match it had just shown.
-                        self.scroll_to(m.line);
+                        if let Some(prompt) = prompt {
+                            self.top = prompt.top;
+                        }
                     }
                 }
             }
@@ -567,42 +579,77 @@ impl Pager<'_> {
         self.mode = Mode::Panel(panel);
     }
 
-    fn update_search(&mut self) {
-        let backward = matches!(self.mode, Mode::Searching { backward: true });
-        let anchor = self.search_anchor;
-        let mut search = Search::new(&self.input, &self.screen);
-        // Follow the nearest match while typing, so the search is incremental:
-        // the first one at or after where the reader started for `/`, the last
-        // one before it for `?`. From the anchor rather than from `top`, because
-        // following a match moves `top`, and a backward search that measured
-        // from there would drift forwards with every keystroke.
-        let target = if backward {
-            search.focus_before(anchor)
-        } else {
-            search.focus_from(anchor)
-        };
-        self.search = Some(search);
-        if let Some(m) = target {
-            self.scroll_into_view(m.line);
+    fn open_prompt(&mut self, backward: bool) {
+        self.mode = Mode::Searching { backward };
+        self.prompt = Some(Prompt {
+            top: self.top,
+            cursor: self.cursor(),
+            prior: self.search.take(),
+        });
+        self.input.clear();
+    }
+
+    /// Where the reader is, as far as a search is concerned: on the current
+    /// match while it is on screen, otherwise at the top of the screen.
+    ///
+    /// Scrolling the match away forgets it, so the next `n` starts from what
+    /// is visible, which is what a reader who has scrolled means by "next".
+    /// This is the pager's one notion of position; keeping a second one in
+    /// the match index and consulting it after the reader had moved on was
+    /// how `n` used to jump back to somewhere they had left.
+    fn cursor(&self) -> Cursor {
+        match self.search.as_ref().and_then(Search::focused) {
+            Some(m) if self.is_visible(m.line) => Cursor::Match(m),
+            _ => Cursor::Line(self.top),
         }
     }
 
-    fn jump_search(&mut self, backward: bool) {
-        let Some(search) = &mut self.search else {
+    fn is_visible(&self, line: usize) -> bool {
+        line >= self.top && line < self.top + self.viewport()
+    }
+
+    /// Re-runs the query as it is typed, previewing where Enter would land.
+    fn update_search(&mut self) {
+        let Some(prompt) = &self.prompt else { return };
+        let (top, cursor) = (prompt.top, prompt.cursor);
+        let backward = matches!(self.mode, Mode::Searching { backward: true });
+        let mut search = Search::new(&self.input, &self.screen);
+        // Measured from where the reader was when the prompt opened, not from
+        // `top`: the preview moves `top`, and a backward search measured from
+        // there drifted forwards with every keystroke. Nothing found puts the
+        // view back, as vim's incsearch does.
+        match search.step(cursor, backward) {
+            Some((m, _)) => self.reveal(m.line),
+            None => self.top = top,
+        }
+        self.search = Some(search);
+    }
+
+    /// `n` and `N`: the next match the way the last search was looking, or
+    /// the other way, from where the reader is now.
+    fn repeat_search(&mut self, reverse: bool) {
+        let cursor = self.cursor();
+        let backward = self.search_backward != reverse;
+        let Some(search) = self.search.as_mut() else {
             self.message = Some("no previous search".into());
             return;
         };
-        let target = if backward {
-            search.retreat()
-        } else {
-            search.advance()
-        };
-        match target {
-            Some(m) => {
-                let line = m.line;
-                self.scroll_to(line);
+        let query = search.query.clone();
+        match search.step(cursor, backward) {
+            Some((m, wrapped)) => {
+                self.reveal(m.line);
+                if wrapped {
+                    self.message = Some(
+                        if backward {
+                            "search wrapped to the end"
+                        } else {
+                            "search wrapped to the top"
+                        }
+                        .into(),
+                    );
+                }
             }
-            None => self.message = Some("no matches".into()),
+            None => self.message = Some(format!("not found: {query}")),
         }
     }
 
@@ -614,19 +661,38 @@ impl Pager<'_> {
     }
 
     /// Puts `line` near the top, leaving a little context above it.
-    fn scroll_to(&mut self, line: usize) {
-        let context = (self.viewport() / 5).min(4);
-        self.top = line.saturating_sub(context).min(self.max_top());
+    /// Lines kept between a target and the edge of the screen.
+    fn context(&self) -> usize {
+        (self.viewport() / 5).min(4)
     }
 
-    /// Scrolls only as far as needed to make `line` visible.
-    fn scroll_into_view(&mut self, line: usize) {
+    fn scroll_to(&mut self, line: usize) {
+        self.top = line.saturating_sub(self.context()).min(self.max_top());
+    }
+
+    /// Brings `line` on screen the way a reader expects: left alone when it is
+    /// already comfortably visible, nudged into view with some context when it
+    /// is near, and placed near the top when it is far, so a long jump lands
+    /// somewhere legible rather than on the bottom edge. The prompt's preview
+    /// and `n` both use this, so accepting a search never moves the view again.
+    fn reveal(&mut self, line: usize) {
         let height = self.viewport();
-        if line < self.top {
-            self.top = line;
-        } else if line >= self.top + height {
-            self.top = (line + 1 - height).min(self.max_top());
+        let context = self.context();
+        if line >= self.top + context && line + context < self.top + height {
+            return;
         }
+        let far = line + height < self.top || line >= self.top + 2 * height;
+        if far {
+            self.scroll_to(line);
+        } else if line < self.top + context {
+            self.top = line.saturating_sub(context);
+        } else {
+            self.top = (line + 1 + context)
+                .saturating_sub(height)
+                .min(self.max_top());
+        }
+    }
+
     }
 
     fn max_left(&self) -> usize {
@@ -663,8 +729,14 @@ impl Pager<'_> {
         self.settings.caps.rows = self.rows;
         self.store.invalidate_encodings();
         self.screen = render(&self.document, &self.settings, self.highlighter, self.store);
-        if let Some(query) = self.search.as_ref().map(|s| s.query.clone()) {
-            self.search = Some(Search::new(&query, &self.screen));
+        if let Some(old) = self.search.take() {
+            let mut search = Search::new(&old.query, &self.screen);
+            // Line numbers have changed; the nearest match at or after where
+            // the old one was is the closest thing to staying put.
+            if let Some(m) = old.focused() {
+                search.step(Cursor::Line(m.line), false);
+            }
+            self.search = Some(search);
         }
         self.clamp();
     }
@@ -1248,7 +1320,8 @@ mod tests {
             rows,
             mode: Mode::Normal,
             search: None,
-            search_anchor: 0,
+            prompt: None,
+            search_backward: false,
             input: String::new(),
             message: None,
             selection: 0,
@@ -1382,10 +1455,11 @@ mod tests {
         for c in "line 1".chars() {
             press(&mut p, KeyCode::Char(c));
         }
-        assert_eq!(p.search.as_ref().unwrap().focused().unwrap().line, 1);
+        assert_eq!(focused_line(&p), 1);
+        let shown = p.top;
         press(&mut p, KeyCode::Enter);
-        assert_eq!(p.search.as_ref().unwrap().focused().unwrap().line, 1);
-        assert!(p.top <= 1, "the match should be on screen: top={}", p.top);
+        assert_eq!(focused_line(&p), 1);
+        assert_eq!(p.top, shown, "accepting must not move the view again");
     }
 
     #[test]
@@ -1397,32 +1471,102 @@ mod tests {
         press(&mut p, KeyCode::Char('?'));
         for c in "line 1".chars() {
             press(&mut p, KeyCode::Char(c));
-            let s = p.search.as_ref().unwrap();
-            if !s.is_empty() {
-                assert!(
-                    s.focused().unwrap().line < 50,
-                    "typing followed a match forwards: {:?}",
-                    s.focused()
-                );
+            if !p.search.as_ref().unwrap().is_empty() {
+                assert!(focused_line(&p) < 50, "typing followed a match forwards");
             }
         }
-        assert_eq!(p.search.as_ref().unwrap().focused().unwrap().line, 19);
         press(&mut p, KeyCode::Enter);
-        assert_eq!(p.search.as_ref().unwrap().focused().unwrap().line, 19);
-        assert!(p.top <= 19 && p.top + p.viewport() > 19, "top={}", p.top);
+        assert_eq!(focused_line(&p), 19);
+        assert!(p.is_visible(19), "top={}", p.top);
     }
 
     #[test]
-    fn a_backward_search_from_the_top_wraps_to_the_end() {
-        // Nothing above line 0, so `?` wraps to the last match, as `/` wraps to
-        // the first when nothing is below.
+    fn n_repeats_the_direction_and_big_n_reverses_it() {
         let mut p = pager(100, 25);
+        p.top = 50;
         press(&mut p, KeyCode::Char('?'));
         for c in "line 1".chars() {
             press(&mut p, KeyCode::Char(c));
         }
         press(&mut p, KeyCode::Enter);
-        assert_eq!(p.search.as_ref().unwrap().focused().unwrap().line, 19);
+        assert_eq!(focused_line(&p), 19);
+        press(&mut p, KeyCode::Char('n'));
+        assert_eq!(focused_line(&p), 18, "n keeps going backwards after ?");
+        press(&mut p, KeyCode::Char('N'));
+        assert_eq!(focused_line(&p), 19, "N goes the other way");
+    }
+
+    #[test]
+    fn n_starts_from_what_is_on_screen_after_scrolling_away() {
+        let mut p = pager(100, 25);
+        press(&mut p, KeyCode::Char('/'));
+        for c in "line 1".chars() {
+            press(&mut p, KeyCode::Char(c));
+        }
+        press(&mut p, KeyCode::Enter);
+        press(&mut p, KeyCode::Char('n'));
+        assert_eq!(focused_line(&p), 10);
+        // The reader scrolls well past every match, then asks for the previous
+        // one: that is the last match above the screen, not the one before 10.
+        p.top = 60;
+        press(&mut p, KeyCode::Char('N'));
+        assert_eq!(focused_line(&p), 19);
+    }
+
+    #[test]
+    fn wrapping_is_announced() {
+        let mut p = pager(100, 25);
+        press(&mut p, KeyCode::Char('/'));
+        for c in "line 99".chars() {
+            press(&mut p, KeyCode::Char(c));
+        }
+        press(&mut p, KeyCode::Enter);
+        press(&mut p, KeyCode::Char('n'));
+        assert_eq!(focused_line(&p), 99);
+        assert!(
+            p.message.as_deref().unwrap().contains("wrapped"),
+            "{:?}",
+            p.message
+        );
+    }
+
+    #[test]
+    fn escape_restores_the_view_and_the_previous_search() {
+        let mut p = pager(100, 25);
+        press(&mut p, KeyCode::Char('/'));
+        for c in "line 42".chars() {
+            press(&mut p, KeyCode::Char(c));
+        }
+        press(&mut p, KeyCode::Enter);
+        let settled = p.top;
+        press(&mut p, KeyCode::Char('/'));
+        for c in "line 9".chars() {
+            press(&mut p, KeyCode::Char(c));
+        }
+        assert_ne!(p.top, settled, "the preview should have moved the view");
+        press(&mut p, KeyCode::Esc);
+        assert_eq!(p.top, settled);
+        assert_eq!(p.search.as_ref().unwrap().query, "line 42");
+    }
+
+    #[test]
+    fn a_pattern_that_stops_matching_puts_the_view_back() {
+        let mut p = pager(100, 25);
+        p.top = 50;
+        press(&mut p, KeyCode::Char('/'));
+        for c in "line 7".chars() {
+            press(&mut p, KeyCode::Char(c));
+        }
+        assert_ne!(p.top, 50);
+        press(&mut p, KeyCode::Char('z'));
+        assert_eq!(p.top, 50, "no match, so nothing to preview");
+        press(&mut p, KeyCode::Enter);
+        assert_eq!(p.top, 50);
+        assert!(p.message.as_deref().unwrap().contains("not found"));
+    }
+
+    fn focused_line(p: &Pager<'_>) -> usize {
+        p.search.as_ref().unwrap().focused().unwrap().line
     }
 
     #[test]
@@ -1443,10 +1587,9 @@ mod tests {
             press(&mut p, KeyCode::Char(c));
         }
         press(&mut p, KeyCode::Enter);
-        let first = p.search.as_ref().unwrap().focused().unwrap().line;
+        assert_eq!(focused_line(&p), 1);
         press(&mut p, KeyCode::Char('n'));
-        let second = p.search.as_ref().unwrap().focused().unwrap().line;
-        assert_ne!(first, second);
+        assert_eq!(focused_line(&p), 10);
     }
 
     #[test]
