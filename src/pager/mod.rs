@@ -693,8 +693,6 @@ impl Pager<'_> {
         }
     }
 
-    }
-
     fn max_left(&self) -> usize {
         let widest = self.screen.lines.iter().map(Line::width).max().unwrap_or(0);
         widest.saturating_sub(self.cols as usize)
