@@ -290,8 +290,9 @@ Inside tmux the terminal that answers is tmux, and its answers are about itself:
 it claims sixel whether or not the terminal it is drawing on could show one. So
 termmd asks tmux instead — `tmux display-message -p '#{client_termfeatures}'`
 reports what tmux decided the *client* can do. A client that does sixel gets
-pictures, drawn by tmux from 3.4 onwards without any passthrough involved, and
-one that does not keeps half blocks. Hyperlinks work the same way. Under GNU
+pictures, drawn by tmux from 3.4 onwards without any passthrough involved, so
+long as tmux was built with `--enable-sixel` (Homebrew's is). A client that does
+not, which includes kitty and Ghostty, keeps half blocks. Hyperlinks work the same way. Under GNU
 screen, or an older tmux that names neither feature, it stays on half blocks.
 
 Sixel is encoded by termmd itself, including the colour quantisation: median cut
