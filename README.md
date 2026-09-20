@@ -385,8 +385,8 @@ looked at what they do:
 - [glow](https://github.com/charmbracelet/glow) — a polished TUI browser for
   local and remote documents. At the time of writing it does not render images.
 - [mdcat](https://github.com/swsnr/mdcat) — the tool that showed terminal
-  Markdown could include real pictures. At the time of writing it does not render
-  tables.
+  Markdown could include real pictures. At the time of writing its README lists
+  inline markup and text wrapping in table cells as not supported.
 - [bat](https://github.com/sharkdp/bat) — not a Markdown renderer, but its
   handling of syntax themes and the ANSI palette convention is worth knowing
   about if you work on this sort of thing.
