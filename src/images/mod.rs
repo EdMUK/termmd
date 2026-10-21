@@ -104,6 +104,33 @@ struct EncodingKey {
     indent: u16,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct KittyKey {
+    url: String,
+    cols: u16,
+    rows: u16,
+}
+
+struct KittyImage {
+    id: u32,
+    width: u32,
+    height: u32,
+    transmission: Option<String>,
+}
+
+/// Identifies a Kitty placement that can be moved or deleted independently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct KittyPlacement {
+    pub(crate) image_id: u32,
+    pub(crate) placement_id: u32,
+}
+
+/// Escape sequence and identity for one Kitty pager draw.
+pub(crate) struct KittyDraw {
+    pub(crate) sequence: String,
+    pub(crate) placement: KittyPlacement,
+}
+
 /// Where images may be loaded from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RemotePolicy {
@@ -128,6 +155,7 @@ pub struct Store {
     decoded: HashMap<String, Result<Loaded, ImageProblem>>,
     /// Encoded escape sequences, keyed by URL and requested cell size.
     encoded: HashMap<EncodingKey, Option<String>>,
+    kitty_images: HashMap<KittyKey, KittyImage>,
     /// Incrementing ids for the kitty protocol.
     next_id: u32,
     /// Set when a remote image was skipped, so the CLI can mention the flag.
@@ -154,6 +182,7 @@ impl Store {
             remote,
             decoded: HashMap::new(),
             encoded: HashMap::new(),
+            kitty_images: HashMap::new(),
             next_id: 1,
             skipped_remote: false,
         }
@@ -173,6 +202,12 @@ impl Store {
     /// is resized and every image needs re-encoding at a new size.
     pub fn invalidate_encodings(&mut self) {
         self.encoded.clear();
+    }
+
+    pub fn invalidate(&mut self) {
+        self.decoded.clear();
+        self.encoded.clear();
+        self.kitty_images.clear();
     }
 
     /// Loads an image, caching the outcome either way.
@@ -243,6 +278,77 @@ impl Store {
         match self.decoded.get(url) {
             Some(Err(problem)) => Some(problem.clone()),
             _ => None,
+        }
+    }
+
+    /// Uploads Kitty image data once, then returns a stable placement.
+    pub(crate) fn kitty_place(
+        &mut self,
+        request: ImageRequest<'_>,
+        placement_id: u32,
+    ) -> Option<KittyDraw> {
+        if self.protocol != GraphicsProtocol::Kitty || request.visible_rows() == 0 {
+            return None;
+        }
+        let key = KittyKey {
+            url: request.image.url.clone(),
+            cols: request.cols,
+            rows: request.rows,
+        };
+        if !self.kitty_images.contains_key(&key) {
+            let (cell_w, cell_h) = self.cell_px;
+            let box_w = request.cols as u32 * cell_w.max(1) as u32;
+            let box_h = request.rows as u32 * cell_h.max(1) as u32;
+            let resized = self.resize(&request.image.url, box_w, box_h)?;
+            let id = self.next_id;
+            let transmission = kitty::transmit(&resized, id)?;
+            self.next_id = self.next_id.wrapping_add(1).max(1);
+            self.kitty_images.insert(
+                key.clone(),
+                KittyImage {
+                    id,
+                    width: resized.width(),
+                    height: resized.height(),
+                    transmission: Some(transmission),
+                },
+            );
+        }
+
+        let image = self.kitty_images.get_mut(&key)?;
+        let crop_unit = self.cell_px.1.max(1) as u32;
+        let top = request.skip_top as u32 * crop_unit;
+        let bottom = request.skip_bottom as u32 * crop_unit;
+        let remaining = image.height.saturating_sub(top).saturating_sub(bottom);
+        let (source_y, source_height) = if remaining == 0 {
+            (0, image.height)
+        } else {
+            (top, remaining)
+        };
+        let mut sequence = image.transmission.take().unwrap_or_default();
+        sequence.push_str(&kitty::place(
+            image.id,
+            placement_id,
+            request.cols,
+            request.visible_rows(),
+            source_y,
+            image.width,
+            source_height,
+        ));
+        Some(KittyDraw {
+            sequence,
+            placement: KittyPlacement {
+                image_id: image.id,
+                placement_id,
+            },
+        })
+    }
+
+    fn resize(&mut self, url: &str, box_w: u32, box_h: u32) -> Option<DynamicImage> {
+        match self.load(url).ok()? {
+            Loaded::Raster(image) => Some(fit(image, box_w, box_h)),
+            // Render vectors at their target size so thin strokes stay sharp.
+            #[cfg(feature = "svg")]
+            Loaded::Vector(tree) => rasterize_svg(tree, box_w, box_h),
         }
     }
 }
@@ -321,14 +427,7 @@ impl Store {
             ),
         };
 
-        let source = self.load(&image.url).ok()?;
-        let resized = match source {
-            Loaded::Raster(image) => fit(image, box_w, box_h),
-            // Vector art is rendered straight at the target size: no scaling
-            // step, so thin strokes and small text stay sharp.
-            #[cfg(feature = "svg")]
-            Loaded::Vector(tree) => rasterize_svg(tree, box_w, box_h)?,
-        };
+        let resized = self.resize(&image.url, box_w, box_h)?;
         let cropped = crop(
             &resized,
             skip_top as u32 * crop_unit,
@@ -691,6 +790,70 @@ mod tests {
             1,
             "decoded pixels survive invalidation"
         );
+    }
+
+    #[test]
+    fn invalidation_reloads_changed_images() {
+        let dir = std::env::temp_dir().join("termmd-test-invalidation");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("t.png"), test_png(8, 8)).unwrap();
+        let img = ImageRef {
+            url: "t.png".into(),
+            ..Default::default()
+        };
+        let mut store = store_with(GraphicsProtocol::Kitty, &dir);
+
+        assert_eq!(store.measure(&img), Some((8, 8)));
+        assert!(store.encode(ImageRequest::new(&img, 4, 2)).is_some());
+        assert!(
+            store
+                .kitty_place(ImageRequest::new(&img, 4, 2), 1)
+                .is_some()
+        );
+        std::fs::write(dir.join("t.png"), test_png(16, 8)).unwrap();
+        assert_eq!(store.measure(&img), Some((8, 8)));
+
+        store.invalidate();
+        assert!(store.encoded.is_empty());
+        assert!(store.kitty_images.is_empty());
+        assert_eq!(store.measure(&img), Some((16, 8)));
+    }
+
+    #[test]
+    fn kitty_pager_transmits_once_and_replaces_its_placement() {
+        let dir = std::env::temp_dir().join("termmd-test-kitty-placement");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("t.png"), test_png(40, 80)).unwrap();
+        let img = ImageRef {
+            url: "t.png".into(),
+            ..Default::default()
+        };
+        let mut store = store_with(GraphicsProtocol::Kitty, &dir);
+
+        let first = store.kitty_place(ImageRequest::new(&img, 4, 4), 7).unwrap();
+        let second = store
+            .kitty_place(
+                ImageRequest {
+                    image: &img,
+                    cols: 4,
+                    rows: 4,
+                    skip_top: 1,
+                    skip_bottom: 0,
+                    indent: 0,
+                },
+                7,
+            )
+            .unwrap();
+
+        assert!(first.sequence.contains("a=t"), "first draw uploads pixels");
+        assert!(first.sequence.contains("a=p"));
+        assert!(
+            !second.sequence.contains("a=t"),
+            "pixels stay in the terminal"
+        );
+        assert!(second.sequence.contains("a=p"));
+        assert!(second.sequence.contains("p=7"));
+        assert_eq!(first.placement, second.placement);
     }
 
     #[test]

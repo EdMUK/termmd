@@ -18,6 +18,7 @@ use image::{DynamicImage, ImageFormat};
 /// Escape sequences have a maximum length, so the payload is chunked. Chunks
 /// must be a multiple of 4 bytes so that base64 quanta are never split.
 const CHUNK: usize = 4096;
+const BELOW_CELL_BACKGROUNDS: i32 = i32::MIN;
 
 /// Encodes an image for display at `cols` x `rows` cells.
 pub fn encode(image: &DynamicImage, cols: u16, rows: u16, id: u32) -> Option<String> {
@@ -30,6 +31,23 @@ pub fn encode(image: &DynamicImage, cols: u16, rows: u16, id: u32) -> Option<Str
 
 /// Wraps already-encoded PNG bytes in the protocol's escape sequences.
 pub fn encode_png(png: &[u8], cols: u16, rows: u16, id: u32) -> String {
+    encode_chunks(
+        png,
+        id,
+        &format!("a=T,f=100,i={id},c={cols},r={rows},z=-1,C=1"),
+    )
+}
+
+/// Transmits image data without displaying it.
+pub(crate) fn transmit(image: &DynamicImage, id: u32) -> Option<String> {
+    let mut png = Vec::new();
+    image
+        .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+        .ok()?;
+    Some(encode_chunks(&png, id, &format!("a=t,f=100,i={id}")))
+}
+
+fn encode_chunks(png: &[u8], id: u32, first: &str) -> String {
     let payload = base64::engine::general_purpose::STANDARD.encode(png);
     let mut out = String::with_capacity(payload.len() + 64);
 
@@ -43,16 +61,8 @@ pub fn encode_png(png: &[u8], cols: u16, rows: u16, id: u32) -> String {
         let more = u8::from(i + 1 < chunks.len());
         out.push_str("\x1b_G");
         if i == 0 {
-            // a=T: transmit and display. q=2: stay quiet, so that a terminal
-            // that does not understand us cannot spray a reply into the page.
-            //
-            // z=-1 places the image above the background but below the text.
-            // kitty's default, 0, draws it *over* the text, so anything the
-            // pager draws on top of a picture -- the contents panel, a search
-            // prompt -- would disappear behind it.
-            out.push_str(&format!(
-                "a=T,f=100,i={id},c={cols},r={rows},z=-1,C=1,q=2,m={more}"
-            ));
+            out.push_str(first);
+            out.push_str(&format!(",q=2,m={more}"));
         } else {
             // Every chunk repeats q=2, not just the first. The suppression key
             // applies per escape code, and a terminal that treats each one
@@ -71,10 +81,29 @@ pub fn encode_png(png: &[u8], cols: u16, rows: u16, id: u32) -> String {
     out
 }
 
-/// Deletes every image placement on screen.
-///
-/// The pager calls this before redrawing so that images from the previous frame
-/// do not linger over the new one.
+/// Places part of a previously transmitted image at the cursor.
+pub(crate) fn place(
+    image_id: u32,
+    placement_id: u32,
+    cols: u16,
+    rows: u16,
+    source_y: u32,
+    source_width: u32,
+    source_height: u32,
+) -> String {
+    // Values below INT32_MIN/2 put images beneath non-default cell backgrounds,
+    // so opaque overlays cover only the part of an image they intersect.
+    format!(
+        "\x1b_Ga=p,i={image_id},p={placement_id},x=0,y={source_y},w={source_width},h={source_height},c={cols},r={rows},z={BELOW_CELL_BACKGROUNDS},C=1,q=2\x1b\\"
+    )
+}
+
+/// Deletes one placement while retaining its image data.
+pub(crate) fn delete_placement(image_id: u32, placement_id: u32) -> String {
+    format!("\x1b_Ga=d,d=i,i={image_id},p={placement_id},q=2\x1b\\")
+}
+
+/// Deletes every image and its stored data when the pager exits.
 pub fn clear_all() -> &'static str {
     "\x1b_Ga=d,d=A,q=2\x1b\\"
 }
@@ -111,6 +140,36 @@ mod tests {
             "text must draw over the image, not under it"
         );
         assert_eq!(keys["m"], "0", "a single chunk is also the last chunk");
+    }
+
+    #[test]
+    fn transmits_without_creating_a_placement() {
+        let image = image::DynamicImage::ImageRgba8(image::RgbaImage::new(8, 8));
+        let seq = transmit(&image, 9).unwrap();
+        let keys = parse_keys(&seq);
+        assert_eq!(keys["a"], "t");
+        assert_eq!(keys["i"], "9");
+        assert!(!keys.contains_key("c"));
+        assert!(!keys.contains_key("r"));
+    }
+
+    #[test]
+    fn places_and_deletes_by_stable_ids() {
+        let placement = place(9, 4, 8, 3, 16, 80, 48);
+        let keys = parse_keys(&placement);
+        assert_eq!(keys["a"], "p");
+        assert_eq!(keys["i"], "9");
+        assert_eq!(keys["p"], "4");
+        assert_eq!(keys["y"], "16");
+        assert_eq!(keys["h"], "48");
+        assert_eq!(keys["z"], BELOW_CELL_BACKGROUNDS.to_string());
+
+        let deletion = delete_placement(9, 4);
+        let keys = parse_keys(&deletion);
+        assert_eq!(keys["a"], "d");
+        assert_eq!(keys["d"], "i");
+        assert_eq!(keys["i"], "9");
+        assert_eq!(keys["p"], "4");
     }
 
     #[test]
