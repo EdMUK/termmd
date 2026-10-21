@@ -51,6 +51,10 @@ const URL_POLL: Duration = Duration::from_secs(5);
 #[derive(Debug, Clone, PartialEq)]
 enum Mode {
     Normal,
+    Copy {
+        cursor: usize,
+        anchor: Option<usize>,
+    },
     /// Typing a search query. `backward` is which way it looks.
     Searching {
         backward: bool,
@@ -125,6 +129,7 @@ pub fn run(
         left: 0,
         cols: settings.caps.cols,
         rows: settings.caps.rows,
+        initial_max_image_rows: settings.render.max_image_rows,
         mode: Mode::Normal,
         search: None,
         prompt: None,
@@ -180,6 +185,7 @@ struct Pager<'a> {
     left: usize,
     cols: u16,
     rows: u16,
+    initial_max_image_rows: u16,
     mode: Mode,
     search: Option<Search>,
     /// Open while a query is being typed.
@@ -261,6 +267,7 @@ impl Pager<'_> {
         }
         self.message = None;
         match self.mode.clone() {
+            Mode::Copy { cursor, anchor } => self.on_copy_key(key, cursor, anchor),
             Mode::Searching { .. } => self.on_search_key(key),
             Mode::Panel(panel) => self.on_panel_key(key, panel),
             Mode::Normal => self.on_normal_key(key),
@@ -339,6 +346,12 @@ impl Pager<'_> {
             KeyCode::Char('?') => self.open_prompt(true),
             KeyCode::Char('n') => self.repeat_search(false),
             KeyCode::Char('N') => self.repeat_search(true),
+            KeyCode::Char('[') => {
+                self.mode = Mode::Copy {
+                    cursor: self.top,
+                    anchor: None,
+                };
+            }
 
             KeyCode::Char('t') => self.open_panel(Panel::Contents),
             KeyCode::Char('L') => self.open_panel(Panel::Links),
@@ -347,12 +360,119 @@ impl Pager<'_> {
             KeyCode::Char('y') => self.copy_visible_code(),
             KeyCode::Char('r') => self.reload()?,
             KeyCode::Char('i') => self.toggle_images(),
+            KeyCode::Char('+') => self.zoom_images(4),
+            KeyCode::Char('-') => self.zoom_images(-4),
+            KeyCode::Char('=') => self.reset_image_zoom(),
             KeyCode::Char('m') => self.toggle_mouse(),
             KeyCode::Backspace => self.go_back(),
             _ => {}
         }
         self.clamp();
         Ok(())
+    }
+
+    fn on_copy_key(&mut self, key: KeyEvent, cursor: usize, anchor: Option<usize>) -> Result<()> {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let page = self.viewport().saturating_sub(2).max(1) as isize;
+        let half = (self.viewport() / 2).max(1) as isize;
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => self.mode = Mode::Normal,
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.move_copy_cursor(cursor, 1, anchor);
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.move_copy_cursor(cursor, -1, anchor);
+            }
+            KeyCode::PageDown => {
+                self.move_copy_cursor(cursor, page, anchor);
+            }
+            KeyCode::Char('f') if ctrl => {
+                self.move_copy_cursor(cursor, page, anchor);
+            }
+            KeyCode::PageUp => {
+                self.move_copy_cursor(cursor, -page, anchor);
+            }
+            KeyCode::Char('b') if ctrl => {
+                self.move_copy_cursor(cursor, -page, anchor);
+            }
+            KeyCode::Char('d') if ctrl => {
+                self.move_copy_cursor(cursor, half, anchor);
+            }
+            KeyCode::Char('u') if ctrl => {
+                self.move_copy_cursor(cursor, -half, anchor);
+            }
+            KeyCode::Char('g') | KeyCode::Home => self.set_copy_cursor(0, anchor),
+            KeyCode::Char('G') | KeyCode::End => {
+                self.set_copy_cursor(self.screen.lines.len().saturating_sub(1), anchor);
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                self.left = self.left.saturating_sub(4);
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                self.left = (self.left + 4).min(self.max_left());
+            }
+            KeyCode::Char('0') => self.left = 0,
+            KeyCode::Char('v') => {
+                let next_anchor = anchor.or(Some(cursor));
+                self.mode = Mode::Copy {
+                    cursor,
+                    anchor: next_anchor,
+                };
+            }
+            KeyCode::Char(' ') if anchor.is_none() => {
+                self.mode = Mode::Copy {
+                    cursor,
+                    anchor: Some(cursor),
+                };
+            }
+            KeyCode::Char(' ') => {
+                self.publish_copy_selection(cursor, anchor);
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Char('y') | KeyCode::Enter => {
+                let next_anchor = anchor.or(Some(cursor));
+                self.publish_copy_selection(cursor, next_anchor);
+                self.mode = Mode::Normal;
+            }
+            _ => {}
+        }
+        self.clamp();
+        Ok(())
+    }
+
+    fn move_copy_cursor(&mut self, cursor: usize, delta: isize, anchor: Option<usize>) {
+        let last = self.screen.lines.len().saturating_sub(1) as isize;
+        let next = (cursor as isize + delta).clamp(0, last) as usize;
+        self.set_copy_cursor(next, anchor);
+    }
+
+    fn set_copy_cursor(&mut self, cursor: usize, anchor: Option<usize>) {
+        self.mode = Mode::Copy { cursor, anchor };
+        self.reveal(cursor);
+    }
+
+    fn publish_copy_selection(&mut self, cursor: usize, anchor: Option<usize>) {
+        let Some(anchor) = anchor else {
+            return;
+        };
+        if self.screen.lines.is_empty() {
+            self.message = Some("nothing to select".into());
+            return;
+        }
+        let (start, end) = if anchor <= cursor {
+            (anchor, cursor)
+        } else {
+            (cursor, anchor)
+        };
+        let text = self.screen.lines[start..=end]
+            .iter()
+            .map(Line::text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let lines = end - start + 1;
+        let plural = if lines == 1 { "" } else { "s" };
+        self.put_on_clipboard(&text, &format!("copied {lines} line{plural}"));
     }
 
     fn on_search_key(&mut self, key: KeyEvent) -> Result<()> {
@@ -704,6 +824,13 @@ impl Pager<'_> {
         if let Mode::Panel(panel) = self.mode {
             self.selection = self.selection.min(self.panel_len(panel).saturating_sub(1));
         }
+        if let Mode::Copy { cursor, anchor } = &mut self.mode {
+            let last = self.screen.lines.len().saturating_sub(1);
+            *cursor = (*cursor).min(last);
+            if let Some(anchor) = anchor {
+                *anchor = (*anchor).min(last);
+            }
+        }
     }
 
     // --- content --------------------------------------------------------
@@ -796,6 +923,29 @@ impl Pager<'_> {
         self.relayout();
     }
 
+    fn zoom_images(&mut self, rows: i16) {
+        let current = self.settings.render.max_image_rows;
+        self.settings.render.max_image_rows = if rows.is_positive() {
+            current.saturating_add(rows as u16).min(200)
+        } else {
+            current.saturating_sub(rows.unsigned_abs()).max(4)
+        };
+        self.message = Some(format!(
+            "maximum image height: {} rows",
+            self.settings.render.max_image_rows
+        ));
+        self.relayout();
+    }
+
+    fn reset_image_zoom(&mut self) {
+        self.settings.render.max_image_rows = self.initial_max_image_rows;
+        self.message = Some(format!(
+            "maximum image height: {} rows (reset)",
+            self.settings.render.max_image_rows
+        ));
+        self.relayout();
+    }
+
     // --- drawing --------------------------------------------------------
 
     fn draw(&mut self) -> Result<()> {
@@ -833,6 +983,31 @@ impl Pager<'_> {
                         self.settings.theme.search_match,
                         self.settings.theme.search_current,
                     )
+                }
+                _ => spans,
+            };
+            let document_line = self.top + row;
+            let spans = match self.mode {
+                Mode::Copy { cursor, anchor } => {
+                    let anchor = anchor.unwrap_or(cursor);
+                    let start = anchor.min(cursor);
+                    let end = anchor.max(cursor);
+                    if (start..=end).contains(&document_line) {
+                        let range = search::Match {
+                            line: document_line,
+                            start: 0,
+                            end: line.width().max(1),
+                        };
+                        search::highlight(
+                            spans,
+                            self.left,
+                            &[(range, true)],
+                            self.settings.theme.search_current,
+                            self.settings.theme.search_current,
+                        )
+                    } else {
+                        spans
+                    }
                 }
                 _ => spans,
             };
@@ -934,6 +1109,13 @@ impl Pager<'_> {
         out.push_str(&format!("\x1b[{};1H\x1b[K", height + 1));
 
         let left = match (&self.mode, &self.message) {
+            (Mode::Copy { cursor, anchor }, _) => match anchor {
+                Some(anchor) => {
+                    let lines = anchor.abs_diff(*cursor) + 1;
+                    format!("COPY  {lines} lines selected")
+                }
+                None => format!("COPY  line {}", cursor + 1),
+            },
             (Mode::Searching { backward }, _) => {
                 let sigil = if *backward { '?' } else { '/' };
                 let count = self
@@ -965,11 +1147,19 @@ impl Pager<'_> {
         } else {
             (self.top * 100 / self.max_top()).min(100)
         };
+        let keys = match self.mode {
+            Mode::Copy {
+                anchor: Some(_), ..
+            } => "j/k move  ctrl+u/d half-page  enter/space copy  q cancel",
+            Mode::Copy { anchor: None, .. } => {
+                "j/k move  ctrl+u/d half-page  v/space select  q cancel"
+            }
+            _ => "H help  q quit",
+        };
         let right = format!(
-            "{}/{}  {percent}%  {}",
+            "{}/{}  {percent}%  {keys}",
             (self.top + 1).min(self.screen.len().max(1)),
             self.screen.len(),
-            "H help  q quit"
         );
 
         let gap = width.saturating_sub(
@@ -1316,6 +1506,7 @@ mod tests {
             left: 0,
             cols: 80,
             rows,
+            initial_max_image_rows: 24,
             mode: Mode::Normal,
             search: None,
             prompt: None,
@@ -1864,6 +2055,58 @@ mod tests {
         press(&mut p, KeyCode::Char('m'));
         assert!(!p.settings.mouse);
         assert!(p.message.as_deref().unwrap().contains("select"));
+    }
+
+    #[test]
+    fn image_zoom_controls_resize_and_reset_images() {
+        let mut p = pager(10, 25);
+        assert_eq!(p.settings.render.max_image_rows, 24);
+
+        press(&mut p, KeyCode::Char('+'));
+        assert_eq!(p.settings.render.max_image_rows, 28);
+        press(&mut p, KeyCode::Char('-'));
+        assert_eq!(p.settings.render.max_image_rows, 24);
+
+        p.settings.render.max_image_rows = 40;
+        press(&mut p, KeyCode::Char('='));
+        assert_eq!(p.settings.render.max_image_rows, 24);
+    }
+
+    #[test]
+    fn copy_mode_selects_across_viewports_with_herdr_keys() {
+        let mut p = pager(100, 10);
+        press(&mut p, KeyCode::Char('['));
+        assert_eq!(
+            p.mode,
+            Mode::Copy {
+                cursor: 0,
+                anchor: None
+            }
+        );
+
+        press(&mut p, KeyCode::Char('v'));
+        for _ in 0..20 {
+            press(&mut p, KeyCode::Char('j'));
+        }
+        assert_eq!(
+            p.mode,
+            Mode::Copy {
+                cursor: 20,
+                anchor: Some(0)
+            }
+        );
+        assert!(
+            p.top > 0,
+            "selection should follow the cursor across viewports"
+        );
+        assert_eq!(
+            p.message, None,
+            "moving a selection must not copy it implicitly"
+        );
+
+        press(&mut p, KeyCode::Char(' '));
+        assert_eq!(p.mode, Mode::Normal);
+        assert!(p.message.as_deref().unwrap().contains("copied 21 lines"));
     }
 
     #[test]
