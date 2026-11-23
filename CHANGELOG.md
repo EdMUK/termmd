@@ -21,6 +21,14 @@ All notable changes to this project are documented here. The format follows
   preview had scrolled it, and `n` after scrolling away jumped relative to a
   match the reader had left rather than to what was on screen.
 
+### Fixed
+
+- Piping Markdown into the pager works on macOS. `git show HEAD:README.md |
+  termmd` opened the pager and then quit with "Failed to initialize input
+  reader", because with stdin taken by the pipe the keys come from `/dev/tty`,
+  and the kqueue that crossterm watched it with cannot watch a tty on macOS.
+  It now uses `poll`, which can.
+
 ## [0.1.4] - 2026-09-03
 
 Four small things noticed while 0.1.3 was going out, none of them about how a
