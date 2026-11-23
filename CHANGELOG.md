@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-23
+
+Two things about the pager: piping Markdown into it works on macOS, where it
+used to quit before the first key, and search follows vim's rules.
+
 ### Changed
 
 - Search in the pager follows vim's rules, all of them, instead of some of
@@ -218,7 +223,8 @@ First release.
 - Themes in TOML, layered over built-in dark, light and monochrome bases.
 - OSC 8 hyperlinks, with inline, reference and hidden URL modes as fallbacks.
 
-[Unreleased]: https://github.com/EdMUK/termmd/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/EdMUK/termmd/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/EdMUK/termmd/releases/tag/v0.1.5
 [0.1.4]: https://github.com/EdMUK/termmd/releases/tag/v0.1.4
 [0.1.3]: https://github.com/EdMUK/termmd/releases/tag/v0.1.3
 [0.1.2]: https://github.com/EdMUK/termmd/releases/tag/v0.1.2
